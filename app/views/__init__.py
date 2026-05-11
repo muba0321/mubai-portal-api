@@ -1,11 +1,11 @@
 from app.views.auth import auth_bp
-from app.views.user import user_bp
-from app.views.incident import incident_bp
-from app.views.service import service_bp
+from app.views.cmdb import cmdb_bp
+from app.views.dashboard import dashboard_bp
+from app.views.system import system_bp
 
 
 def register_blueprints(app):
-    app.register_blueprint(auth_bp, url_prefix="/api/auth")
-    app.register_blueprint(user_bp, url_prefix="/api/users")
-    app.register_blueprint(incident_bp, url_prefix="/api/incidents")
-    app.register_blueprint(service_bp, url_prefix="/api/services")
+    app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
+    app.register_blueprint(cmdb_bp, url_prefix="/api/v1/cmdb")
+    app.register_blueprint(dashboard_bp, url_prefix="/api/v1/dashboard")
+    app.register_blueprint(system_bp, url_prefix="/api/v1")

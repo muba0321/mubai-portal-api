@@ -1,34 +1,49 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Blueprint, request
+from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required
+from werkzeug.security import check_password_hash
 from app.extensions import db
-from app.models.user import User
+from app.models.sys import SysUser
+from app.utils.response import success, error
 
 auth_bp = Blueprint("auth", __name__)
-
-
-@auth_bp.route("/register", methods=["POST"])
-def register():
-    data = request.get_json()
-    if User.query.filter_by(username=data["username"]).first():
-        return jsonify({"message": "用户名已存在"}), 400
-
-    user = User(
-        username=data["username"],
-        password_hash=generate_password_hash(data["password"]),
-        email=data.get("email", ""),
-    )
-    db.session.add(user)
-    db.session.commit()
-    return jsonify({"message": "注册成功"}), 201
 
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    user = User.query.filter_by(username=data["username"]).first()
-    if not user or not check_password_hash(user.password_hash, data["password"]):
-        return jsonify({"message": "用户名或密码错误"}), 401
+    username = data.get("username", "")
+    password = data.get("password", "")
 
-    token = create_access_token(identity=user.id)
-    return jsonify({"access_token": token, "user_id": user.id})
+    user = SysUser.query.filter_by(username=username, deleted=0).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return error(msg="用户名或密码错误", code="A0300")
+
+    access_token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    refresh_token = create_refresh_token(identity=str(user.id))
+
+    return success(data={
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }, msg="登录成功")
+
+
+@auth_bp.route("/refresh-token", methods=["POST"])
+def refresh_token_endpoint():
+    refresh_token = request.args.get("refresh_token")
+    if not refresh_token:
+        return error(msg="缺少 refresh token", code="A0231")
+
+    try:
+        from flask_jwt_extended import decode_token
+        decode_token(refresh_token)
+    except Exception:
+        return error(msg="Refresh token 无效", code="A0231")
+
+    new_access_token = create_access_token(identity=get_jwt_identity())
+    return success(data={"access_token": new_access_token})
+
+
+@auth_bp.route("/logout", methods=["POST"])
+@jwt_required()
+def logout():
+    return success(msg="退出成功")
