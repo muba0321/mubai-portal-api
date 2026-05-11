@@ -35,11 +35,14 @@ def refresh_token_endpoint():
 
     try:
         from flask_jwt_extended import decode_token
-        decode_token(refresh_token)
+        decoded = decode_token(refresh_token)
+        user_id = decoded.get("sub")
+        if not user_id:
+            return error(msg="Refresh token 无效", code="A0231")
     except Exception:
         return error(msg="Refresh token 无效", code="A0231")
 
-    new_access_token = create_access_token(identity=get_jwt_identity())
+    new_access_token = create_access_token(identity=user_id)
     return success(data={"access_token": new_access_token})
 
 
