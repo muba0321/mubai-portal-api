@@ -48,6 +48,53 @@ def common_links():
     return success(data=data)
 
 
+@dashboard_bp.route("/common-links", methods=["POST"])
+@jwt_required()
+def create_common_link():
+    data = request.get_json()
+    link = SysCommonLink(
+        title=data.get("title", ""),
+        description=data.get("description", ""),
+        url=data.get("url", ""),
+        icon=data.get("icon", "Link"),
+        sort=int(data.get("sort", 0)),
+        enabled=1,
+    )
+    db.session.add(link)
+    db.session.commit()
+    return success(data={"id": link.id}, msg="添加成功")
+
+
+@dashboard_bp.route("/common-links/<int:link_id>", methods=["PUT"])
+@jwt_required()
+def update_common_link(link_id):
+    link = SysCommonLink.query.get(link_id)
+    if not link:
+        from app.utils.response import error
+        return error(msg="链接不存在", code="40400")
+    data = request.get_json()
+    link.title = data.get("title", link.title)
+    link.description = data.get("description", link.description)
+    link.url = data.get("url", link.url)
+    link.icon = data.get("icon", link.icon)
+    link.sort = int(data.get("sort", link.sort))
+    link.enabled = int(data.get("enabled", link.enabled))
+    db.session.commit()
+    return success(msg="修改成功")
+
+
+@dashboard_bp.route("/common-links/<int:link_id>", methods=["DELETE"])
+@jwt_required()
+def delete_common_link(link_id):
+    link = SysCommonLink.query.get(link_id)
+    if not link:
+        from app.utils.response import error
+        return error(msg="链接不存在", code="40400")
+    db.session.delete(link)
+    db.session.commit()
+    return success(msg="删除成功")
+
+
 @dashboard_bp.route("/recent-visits", methods=["GET"])
 @jwt_required()
 def get_recent_visits():
