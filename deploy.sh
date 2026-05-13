@@ -103,7 +103,7 @@ info "检查后端健康状态..."
 MAX_RETRIES=10
 RETRY=0
 while [ $RETRY -lt $MAX_RETRIES ]; do
-    if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:5000/health > /dev/null 2>&1 || wget -q --spider http://localhost:5000/health 2>&1; then
         info "后端服务健康检查通过"
         break
     fi
