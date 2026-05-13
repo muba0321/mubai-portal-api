@@ -51,7 +51,7 @@ fi
 # 2. 构建前端镜像
 ##############################################################################
 info "=== 步骤 2/5: 构建前端镜像 ==="
-FRONTEND_DIR="../01-frontend/sre-portal-frontend"
+FRONTEND_DIR="../01-frontend/mubai-portal"
 if [ ! -d "$FRONTEND_DIR" ]; then
     error "前端代码目录不存在: $FRONTEND_DIR"
 fi
