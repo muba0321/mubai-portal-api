@@ -1,3 +1,9 @@
+# ============================================================
+# 本地开发用 docker-compose.yml
+# 注意：此文件仅用于本地开发/调试（frontend build context 依赖本地路径）
+# 生产环境请使用 04-deploy/docker-compose.yml 配合 deploy_backend.py 部署
+# ============================================================
+
 version: '3.8'
 
 services:
