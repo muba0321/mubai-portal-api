@@ -6,3 +6,6 @@ venv/
 dist/
 build/
 instance/
+*.log
+.pytest_cache/
+coverage/

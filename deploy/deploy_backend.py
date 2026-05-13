@@ -2,7 +2,6 @@
 # ============================================================
 # SRE Portal 一键部署脚本 (Python 版)
 # 适用于 Windows/Mac/Linux，通过 paramiko SSH 部署
-# 用途：部署前后端完整服务（前端 + 后端 + MySQL 已存在）
 # 用法: python deploy/deploy_backend.py
 # ============================================================
 
@@ -10,7 +9,6 @@ import paramiko
 import os
 import time
 import sys
-import subprocess
 
 HOST = "154.12.54.207"
 USER = "root"
@@ -26,21 +24,6 @@ NC = "\033[0m"
 def log(msg): print(f"{GREEN}[INFO]{NC} {msg}")
 def warn(msg): print(f"{YELLOW}[WARN]{NC} {msg}")
 def err(msg): print(f"{RED}[ERROR]{NC} {msg}")
-
-def resolve_project_root():
-    """自动定位项目根目录（04-deploy 的上一级）"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(script_dir, ".."),
-        os.path.join(script_dir, "..", ".."),
-    ]
-    for c in candidates:
-        abs_c = os.path.normpath(c)
-        frontend = os.path.join(abs_c, "01-frontend", "sre-portal-frontend", "Dockerfile")
-        backend = os.path.join(abs_c, "02-backend", "sre-portal-backend", "Dockerfile")
-        if os.path.isfile(frontend) and os.path.isfile(backend):
-            return abs_c
-    return None
 
 def upload_dir_recursive(sftp, local_dir, remote_dir, exclude_dirs=None, exclude_exts=None):
     """通过 sftp 上传整个目录"""
@@ -105,20 +88,18 @@ def main():
     print(f"  目标: {USER}@{HOST}")
     print("=" * 50)
 
-    # 定位项目根目录
-    project_root = resolve_project_root()
-    if not project_root:
-        err("找不到项目根目录，请确保：")
-        print("  1. 此脚本在 04-deploy/ 目录下")
-        print("  2. 项目结构包含 01-frontend/ 和 02-backend/")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.normpath(os.path.join(script_dir, ".."))
+    compose_src = os.path.join(script_dir, "docker-compose.yml")
+
+    if not os.path.isfile(os.path.join(repo_root, "Dockerfile")):
+        err("找不到后端 Dockerfile，请确保脚本在仓库的 deploy/ 目录下")
+        sys.exit(1)
+    if not os.path.isfile(compose_src):
+        err("找不到 docker-compose.yml")
         sys.exit(1)
 
-    frontend_src = os.path.join(project_root, "01-frontend", "sre-portal-frontend")
-    backend_src = os.path.join(project_root, "02-backend", "sre-portal-backend")
-    compose_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker-compose.yml")
-
-    log(f"前端源码: {frontend_src}")
-    log(f"后端源码: {backend_src}")
+    log(f"后端源码: {repo_root}")
 
     # SSH 连接
     log(f"连接 SSH {HOST}...")
@@ -135,51 +116,51 @@ def main():
     log("SSH 已连接")
 
     # Step 1: 检查 Docker
-    log("[1/6] 检查 Docker 环境...")
+    log("[1/7] 检查 Docker 环境...")
     out, _, rc = run_cmd(client,
-        "docker --version 2>/dev/null && docker compose version 2>/dev/null || docker-compose --version 2>/dev/null || echo NO_COMPOSE",
+        "docker --version 2>/dev/null && docker compose version 2>/dev/null || echo NO_COMPOSE",
         "Docker 和 Docker Compose")
 
     if "Docker version" not in out:
         warn("Docker 未安装，正在安装...")
         run_cmd(client, "curl -fsSL https://get.docker.com | sh -", "安装 Docker", timeout=300)
         run_cmd(client, "systemctl enable docker && systemctl start docker", "启动 Docker 服务")
-        run_cmd(client, "docker --version", "验证 Docker")
 
     # Step 2: 创建目录
-    log("[2/6] 创建项目目录...")
+    log("[2/7] 创建项目目录...")
     run_cmd(client, f"mkdir -p {PROJECT_DIR}/frontend {PROJECT_DIR}/backend", "创建目录")
 
-    # Step 3: 上传源码
+    # Step 3: 获取前端代码（服务器上通过 git clone）
+    log("[3/7] 准备前端代码...")
+    run_cmd(client,
+        f"test -d {PROJECT_DIR}/frontend/.git || git clone {FRONTEND_REPO} {PROJECT_DIR}/frontend",
+        "克隆前端仓库")
+
+    # Step 4: 上传后端代码
+    log("[4/7] 上传后端代码...")
     sftp = client.open_sftp()
-
-    log("[3/6] 上传前端代码...")
-    up, sk = upload_dir_recursive(sftp, frontend_src, f"{PROJECT_DIR}/frontend")
+    up, sk = upload_dir_recursive(sftp, repo_root, f"{PROJECT_DIR}/backend")
     log(f"  上传 {up} 个文件，跳过 {sk} 个")
 
-    log("[3/6] 上传后端代码...")
-    up, sk = upload_dir_recursive(sftp, backend_src, f"{PROJECT_DIR}/backend")
-    log(f"  上传 {up} 个文件，跳过 {sk} 个")
-
-    log("[3/6] 上传 docker-compose.yml...")
+    log("[4/7] 上传 docker-compose.yml...")
     sftp.put(compose_src, f"{PROJECT_DIR}/docker-compose.yml")
     sftp.close()
 
-    # Step 4: 清理旧服务
-    log("[4/6] 清理旧服务...")
+    # Step 5: 清理旧服务
+    log("[5/7] 清理旧服务...")
     run_cmd(client, f"cd {PROJECT_DIR} && docker compose down --remove-orphans 2>/dev/null || true",
             "停止并清理旧服务")
     run_cmd(client, "docker rm -f sre-portal-frontend sre-portal-backend 2>/dev/null || true",
             "强制删除旧容器")
 
-    # Step 5: 构建并启动
-    log("[5/6] 构建并启动服务（前端 + 后端）...")
+    # Step 6: 构建并启动
+    log("[6/7] 构建并启动服务...")
     out, er, rc = run_cmd(client,
         f"cd {PROJECT_DIR} && docker compose build --no-cache 2>&1",
         "构建镜像（约 2-3 分钟）", timeout=600)
 
-    if "error" in out.lower() and "failed to solve" in out.lower():
-        err("构建失败，查看完整输出:")
+    if "failed to solve" in out.lower() or "cannot build" in out.lower():
+        err("构建失败")
         print(out[-2000:] if len(out) > 2000 else out)
         client.close()
         sys.exit(1)
@@ -187,18 +168,16 @@ def main():
     run_cmd(client, f"cd {PROJECT_DIR} && docker compose up -d 2>&1",
             "启动服务")
 
-    # Step 6: 健康检查
-    log("[6/6] 等待服务启动并执行健康检查...")
+    # Step 7: 健康检查
+    log("[7/7] 等待服务启动并执行健康检查...")
     time.sleep(15)
 
-    # 检查前端
     out, _, _ = run_cmd(client,
         "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/ 2>/dev/null || echo 000",
         "前端健康检查", timeout=15)
     frontend_code = out.strip().replace("\r", "").replace("\n", "")
     frontend_ok = frontend_code == "200"
 
-    # 检查后端
     out, _, _ = run_cmd(client,
         "curl -s http://localhost:5000/health 2>/dev/null || echo fail",
         "后端健康检查", timeout=15)
