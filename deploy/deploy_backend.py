@@ -192,16 +192,18 @@ def main():
     time.sleep(15)
 
     # 检查前端
-    _, out, _ = run_cmd(client,
+    out, _, _ = run_cmd(client,
         "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/ 2>/dev/null || echo 000",
         "前端健康检查", timeout=15)
-    frontend_ok = out.strip() == "200"
+    frontend_code = out.strip().replace("\r", "").replace("\n", "")
+    frontend_ok = frontend_code == "200"
 
     # 检查后端
-    _, out, _ = run_cmd(client,
+    out, _, _ = run_cmd(client,
         "curl -s http://localhost:5000/health 2>/dev/null || echo fail",
         "后端健康检查", timeout=15)
-    backend_ok = "ok" in out.lower()
+    backend_resp = out.strip().replace("\r", "")
+    backend_ok = "ok" in backend_resp.lower()
 
     print()
     run_cmd(client, f"cd {PROJECT_DIR} && docker compose ps", "容器状态")
