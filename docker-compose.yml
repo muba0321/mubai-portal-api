@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # 后端 API 服务
+  sre-portal-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sre-portal-backend
+    restart: always
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://root:huanxin0321@154.12.54.207:3306/sre_portal}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_EXPIRES: ${JWT_EXPIRES:-3600}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-604800}
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # 前端 + Nginx 反向代理
+  sre-portal-nginx:
+    build:
+      context: ../01-frontend/sre-portal-frontend
+      dockerfile: Dockerfile
+    container_name: sre-portal-nginx
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      sre-portal-backend:
+        condition: service_healthy

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 测试
+.pytest_cache/
+coverage/
+
+# 迁移文件中的自动生成文件（保留迁移脚本本身）
+migrations/versions/__pycache__/
+
+# Git
+.git/
+
+# 文档
+API.md
+CHANGELOG.md
