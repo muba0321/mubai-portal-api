@@ -1,0 +1,52 @@
+version: '3.8'
+
+# SRE Portal 一键部署编排文件
+# 使用方式：将此文件放到服务器 /opt/sre-portal/docker-compose.yml
+# 然后执行：docker compose build && docker compose up -d
+# 项目结构：
+#   /opt/sre-portal/
+#   ├── docker-compose.yml
+#   ├── frontend/     ← 前端源码 (01-frontend/sre-portal-frontend)
+#   └── backend/      ← 后端源码 (02-backend/sre-portal-backend)
+
+services:
+  sre-portal-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sre-portal-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - sre-portal-backend
+    networks:
+      - sre-network
+
+  sre-portal-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sre-portal-backend
+    restart: always
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://root:huanxin0321@154.12.54.207:3306/sre_portal}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_EXPIRES: ${JWT_EXPIRES:-3600}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-604800}
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sre-network
+
+networks:
+  sre-network:
+    driver: bridge
