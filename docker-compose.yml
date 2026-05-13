@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+  sre-portal-frontend:
+    build:
+      context: ../../01-frontend/sre-portal-frontend
+      dockerfile: Dockerfile
+    container_name: sre-portal-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - sre-portal-backend
+    networks:
+      - sre-network
+
   sre-portal-backend:
     build:
       context: .
@@ -22,3 +35,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    networks:
+      - sre-network
+
+networks:
+  sre-network:
+    driver: bridge
