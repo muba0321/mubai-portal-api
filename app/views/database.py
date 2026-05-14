@@ -280,30 +280,26 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
 
     # 获取 API 配置
     api_key = current_app.config.get("AI_API_KEY", "")
-    model = current_app.config.get("AI_MODEL", "qwen-coder-plus")
+    model = current_app.config.get("AI_MODEL", "qwen3.5-plus")
 
     if not api_key:
         # 无 API Key 时降级为规则生成
         return _fallback_rule_sql(text_input, schema)
 
-    # 调用 DashScope API
-    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+    # 调用 DashScope Coding Plan API（OpenAI 兼容格式）
+    url = "https://coding.dashscope.aliyuncs.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
     }
     body = {
         "model": model,
-        "input": {
-            "messages": [
-                {"role": "system", "content": "你是一个专业的 MySQL DBA。根据用户的中文描述生成 MySQL 只读 SQL。只返回纯 SQL，不要任何解释。"},
-                {"role": "user", "content": prompt},
-            ]
-        },
-        "parameters": {
-            "temperature": 0.1,
-            "max_tokens": 512,
-        },
+        "messages": [
+            {"role": "system", "content": "你是一个专业的 MySQL DBA。根据用户的中文描述生成 MySQL 只读 SQL。只返回纯 SQL，不要任何解释。"},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 512,
     }
 
     try:
@@ -316,11 +312,10 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
-        # 解析返回内容
-        if "output" in result and "text" in result["output"]:
-            sql = result["output"]["text"].strip()
-        elif "output" in result and "choices" in result["output"]:
-            sql = result["output"]["choices"][0].get("message", {}).get("content", "").strip()
+        # OpenAI 兼容格式解析
+        choices = result.get("choices", [])
+        if choices:
+            sql = choices[0].get("message", {}).get("content", "").strip()
         else:
             raise Exception(f"API 返回格式异常: {result}")
 
@@ -328,9 +323,6 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         sql = re.sub(r"^```(?:sql)?\s*", "", sql)
         sql = re.sub(r"\s*```$", "", sql)
         sql = sql.strip()
-
-        # 如果 AI 返回了说明文字，也一并返回
-        explanation = result.get("output", {}).get("text", "")
 
         return sql, f"AI 模型生成 ({model})"
 

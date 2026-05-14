@@ -19,7 +19,7 @@ class Config:
 
     # AI 模型配置（通义千问 DashScope）
     AI_API_KEY = os.getenv("AI_API_KEY", "")
-    AI_MODEL = os.getenv("AI_MODEL", "qwen-coder-plus")
+    AI_MODEL = os.getenv("AI_MODEL", "qwen3.5-plus")
 
 
 class DevelopmentConfig(Config):
