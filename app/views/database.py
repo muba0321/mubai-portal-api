@@ -1,6 +1,9 @@
+import json
 import re
+import urllib.request
+import urllib.error
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 from flask_jwt_extended import jwt_required
 from sqlalchemy import text
 
@@ -225,7 +228,7 @@ def create_database():
 @database_bp.route("/nl-to-sql", methods=["POST"])
 @jwt_required()
 def nl_to_sql():
-    """自然语言转 SQL（规则匹配）"""
+    """自然语言转 SQL（AI 模型）"""
     data = request.get_json() or {}
     text_input = data.get("text", "").strip()
     database = data.get("database", "")
@@ -239,233 +242,116 @@ def nl_to_sql():
 
     try:
         schema = _get_all_tables_with_columns(database)
-        sql, explanation = _generate_sql(text_input, schema)
+        sql, explanation = _call_ai_for_sql(text_input, schema, database)
+        # 安全校验
+        if sql and not _is_safe_sql(sql):
+            return error(msg="AI 生成的 SQL 不符合只读要求，请重新描述", code="40003")
         return success(data={"sql": sql, "explanation": explanation})
     except Exception as e:
         return error(msg=f"生成 SQL 失败: {str(e)}")
 
 
-def _generate_sql(text: str, schema: dict) -> tuple:
-    """基于规则的自然语言转 SQL 生成"""
-    text_lower = text.lower()
+def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
+    """调用 AI 模型生成 SQL"""
+    # 构建 schema 描述
+    schema_desc = ""
+    for table, columns in schema.items():
+        schema_desc += f"\n表名: {table}\n列: {', '.join(columns)}\n"
 
-    # === 意图识别 ===
-    is_count = any(kw in text_lower for kw in ["统计", "数量", "有多少", "多少", "总数", "count"])
-    is_order = any(kw in text_lower for kw in ["排序", "按", "order"])
-    is_top = any(kw in text_lower for kw in ["前", "top", "最多", "最高", "最低"])
-    is_latest = any(kw in text_lower for kw in ["最新", "最近", "最近一次", "最后"])
-    is_like = any(kw in text_lower for kw in ["包含", "含有", "like", "模糊"])
-    is_distinct = any(kw in text_lower for kw in ["去重", "不重复", "distinct", "唯一"])
-    is_group = any(kw in text_lower for kw in ["分组", "group", "按...统计"])
+    prompt = f"""你是一个专业的 MySQL DBA，请根据以下数据库 schema 和用户描述生成对应的 SQL 查询语句。
 
-    # === 提取 LIMIT 数量 ===
-    limit = None
-    top_match = re.search(r"(?:前|top|最多|最少|最高|最低)?\s*(\d+)\s*(?:个|条|名|条记录|个记录)?", text_lower)
-    if top_match or is_top:
-        limit = int(top_match.group(1)) if top_match else 10
+数据库: {database}
+表结构信息:
+{schema_desc}
 
-    # === 表匹配 ===
-    table = _match_table(text_lower, schema)
-    if not table:
-        return "", f"未找到与查询相关的表，请指定表名。可用表：{', '.join(schema.keys())}"
+用户描述: {text_input}
 
-    columns = schema[table]
+要求：
+1. 仅使用 SELECT 查询（只读）
+2. 使用 MySQL 语法
+3. 只返回 SQL 语句，不要任何解释或 Markdown 格式
+4. 如果描述不清晰，生成一个最合理的 SELECT 查询"""
 
-    # === 列匹配 ===
-    matched_cols = _match_columns(text_lower, columns)
+    # 获取 API 配置
+    api_key = current_app.config.get("AI_API_KEY", "")
+    model = current_app.config.get("AI_MODEL", "qwen-coder-plus")
 
-    # === WHERE 条件 ===
-    where_clause = _build_where(text_lower, columns)
+    if not api_key:
+        # 无 API Key 时降级为规则生成
+        return _fallback_rule_sql(text_input, schema)
 
-    # === ORDER BY ===
-    order_clause = _build_order(text_lower, columns)
+    # 调用 DashScope API
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    body = {
+        "model": model,
+        "input": {
+            "messages": [
+                {"role": "system", "content": "你是一个专业的 MySQL DBA，只返回 SQL 语句，不要解释。"},
+                {"role": "user", "content": prompt},
+            ]
+        },
+        "parameters": {
+            "temperature": 0.1,
+            "max_tokens": 512,
+        },
+    }
 
-    # === 生成 SQL ===
-    # 如果用户指定了具体列且不是 COUNT 查询，用指定列；否则用 *
-    has_specific_cols = bool(matched_cols) and not is_count and not is_distinct
-    # 但如果只有排序相关的列被匹配，且用户没有明确提"查XX和YY"，仍然用 *
-    if is_count:
-        if is_group and matched_cols:
-            sql = f"SELECT {matched_cols[0]}, COUNT(*) AS count FROM `{table}`"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+
+        # 解析返回内容
+        if "output" in result and "text" in result["output"]:
+            sql = result["output"]["text"].strip()
+        elif "output" in result and "choices" in result["output"]:
+            sql = result["output"]["choices"][0].get("message", {}).get("content", "").strip()
         else:
-            sql = f"SELECT COUNT(*) AS total FROM `{table}`"
-    elif is_distinct and matched_cols:
-        cols = ", ".join(matched_cols)
-        sql = f"SELECT DISTINCT {cols} FROM `{table}`"
-    elif has_specific_cols and len(matched_cols) > 1:
-        cols = ", ".join(matched_cols)
-        sql = f"SELECT {cols} FROM `{table}`"
-    else:
-        sql = f"SELECT * FROM `{table}`"
+            raise Exception(f"API 返回格式异常: {result}")
 
-    if where_clause:
-        sql += f" WHERE {where_clause}"
+        # 清理 Markdown 代码块
+        sql = re.sub(r"^```(?:sql)?\s*", "", sql)
+        sql = re.sub(r"\s*```$", "", sql)
+        sql = sql.strip()
 
-    if order_clause:
-        sql += f" ORDER BY {order_clause}"
+        # 如果 AI 返回了说明文字，也一并返回
+        explanation = result.get("output", {}).get("text", "")
 
-    if limit:
-        sql += f" LIMIT {limit}"
+        return sql, f"AI 模型生成 ({model})"
 
-    explanation = _build_explanation(text, sql, table, matched_cols, where_clause, order_clause, limit)
-    return sql, explanation
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise Exception(f"DashScope API 错误 ({e.code}): {err_body}")
+    except urllib.error.URLError as e:
+        raise Exception(f"无法连接 DashScope API: {e.reason}")
 
 
-def _match_table(text: str, schema: dict) -> str:
-    """匹配最相关的表名"""
-    # 关键词到表的映射（支持前缀匹配：sys_user, cmdb_vm 等）
-    table_keywords = {
-        "user": ["用户", "user", "admin", "管理员", "账号"],
-        "vm": ["虚拟机", "vm", "服务器", "主机", "机器", "云主机", "集群"],
-        "menu": ["菜单", "menu", "路由", "导航"],
-        "role": ["角色", "role"],
-        "permission": ["权限", "permission"],
-        "log": ["日志", "log", "操作记录"],
-        "cmdb": ["cmdb", "资产"],
-        "dashboard": ["面板", "dashboard", "概览", "状态"],
-        "common": ["常用", "common", "链接"],
-        "config": ["配置", "config", "设置"],
-        "token": ["token", "令牌"],
-    }
-    # 先尝试直接匹配
-    for table in schema:
-        if table.lower() in text:
-            return table
-        clean = table.replace("_", "").replace("-", "")
-        if clean in text:
-            return table
-    # 通过关键词匹配：检查表名中是否包含任意关键词的 key
-    for table in schema:
-        table_lower = table.lower()
-        for key, keywords in table_keywords.items():
-            if key in table_lower:
-                for kw in keywords:
-                    if kw in text:
-                        return table
-    return ""
+def _fallback_rule_sql(text: str, schema: dict) -> tuple:
+    """AI 不可用时的规则降级（简化版）"""
+    text_lower = text.lower()
+    table = ""
+    for t in schema:
+        if t.lower() in text_lower or t.replace("_", "") in text_lower:
+            table = t
+            break
+    if not table:
+        # 关键词映射
+        for t in schema:
+            tl = t.lower()
+            if "user" in tl and "用户" in text_lower:
+                table = t; break
+            if "vm" in tl and ("虚拟" in text_lower or "机器" in text_lower):
+                table = t; break
 
-
-def _match_columns(text: str, columns: list) -> list:
-    """匹配相关列名"""
-    col_keywords = {
-        "name": ["名称", "名字", "姓名"],
-        "status": ["状态", "status"],
-        "ip": ["ip", "地址"],
-        "hostname": ["主机名", "hostname"],
-        "created": ["创建"],
-        "updated": ["更新"],
-        "type": ["类型"],
-        "id": ["编号"],
-        "memory": ["内存", "memory"],
-        "cpu": ["cpu", "处理器"],
-        "disk": ["磁盘", "硬盘"],
-        "os": ["系统", "os", "操作系统"],
-        "cluster": ["集群"],
-        "description": ["描述", "说明"],
-        "password": ["密码", "password"],
-        "email": ["邮箱", "email"],
-        "username": ["用户名", "username"],
-        "role": ["角色"],
-        "path": ["路径", "path", "路由"],
-        "icon": ["图标", "icon"],
-    }
-    matched = []
-    for col in columns:
-        col_lower = col.lower()
-        # 直接匹配
-        if col_lower in text:
-            matched.append(col)
-            continue
-        # 关键词映射：检查列名中是否包含 key
-        for key, keywords in col_keywords.items():
-            if key in col_lower:
-                for kw in keywords:
-                    if kw in text:
-                        matched.append(col)
-                        break
-                if col in matched:
-                    break
-    # 去重
-    seen = set()
-    result = []
-    for c in matched:
-        if c not in seen:
-            seen.add(c)
-            result.append(c)
-    return result[:5]
-
-
-def _build_where(text: str, columns: list) -> str:
-    """构建 WHERE 条件"""
-    conditions = []
-    for col in columns:
-        col_lower = col.lower()
-        # 等于条件
-        eq_match = re.search(rf"(?:{col_lower}|{col})\s*=?\s*为\s*(['一-鿿\w]+)", text)
-        if eq_match:
-            val = eq_match.group(1)
-            conditions.append(f"`{col}` = '{val}'")
-        # 包含/like 条件
-        if any(kw in text for kw in [f"{col}包含", f"{col}含有"]):
-            like_match = re.search(rf"{col_lower}(?:包含|含有)\s*(['一-鿿\w]+)", text)
-            if like_match:
-                val = like_match.group(1)
-                conditions.append(f"`{col}` LIKE '%{val}%'")
-
-    return " AND ".join(conditions)
-
-
-def _build_order(text: str, columns: list) -> str:
-    """构建 ORDER BY 子句"""
-    col_keywords_order = {
-        "created": ["创建", "创建时间"],
-        "updated": ["更新", "更新时间"],
-        "time": ["时间"],
-        "date": ["日期"],
-        "name": ["名称", "名字"],
-        "memory": ["内存"],
-        "cpu": ["cpu"],
-        "disk": ["磁盘", "硬盘"],
-        "ip": ["ip", "地址"],
-        "status": ["状态"],
-        "cluster": ["集群"],
-    }
-    # 检查是否包含排序意图词
-    sort_indicators = ["按", "排序", "order"]
-    if not any(kw in text for kw in sort_indicators):
-        # 但如果是"最新/最近"类描述，仍需要时间排序
-        if not any(kw in text for kw in ["最新", "最近", "最后"]):
-            return ""
-
-    for col in columns:
-        col_lower = col.lower()
-        for key, keywords in col_keywords_order.items():
-            if key in col_lower:
-                for kw in keywords:
-                    if kw in text:
-                        if "降序" in text or "倒序" in text or "从高到低" in text:
-                            return f"`{col}` DESC"
-                        if "升序" in text or "从低到高" in text:
-                            return f"`{col}` ASC"
-                        # 默认降序（最新/最大等语义）
-                        return f"`{col}` DESC"
-    # 时间相关默认排序
-    if any(kw in text for kw in ["最新", "最近", "按时间"]):
-        for col in columns:
-            if any(kw in col.lower() for kw in ["time", "date", "created", "updated"]):
-                return f"`{col}` DESC"
-    return ""
-
-
-def _build_explanation(text: str, sql: str, table: str, cols, where, order, limit) -> str:
-    """生成解释说明"""
-    parts = [f"查询表: {table}"]
-    if cols:
-        parts.append(f"查询字段: {', '.join(cols)}")
-    if where:
-        parts.append(f"过滤条件: {where}")
-    if order:
-        parts.append(f"排序: {order}")
-    if limit:
-        parts.append(f"限制: {limit} 条")
-    return "; ".join(parts)
+    if not table:
+        return "", "AI 服务不可用，且无法匹配到相关表"
+    return f"SELECT * FROM `{table}`", "规则降级生成"

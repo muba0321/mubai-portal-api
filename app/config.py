@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 项目版本
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 
 class Config:
@@ -16,6 +16,10 @@ class Config:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "jwt-secret-key-change-in-prod")
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_EXPIRES", 3600))
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv("JWT_REFRESH_EXPIRES", 86400 * 7))
+
+    # AI 模型配置（通义千问 DashScope）
+    AI_API_KEY = os.getenv("AI_API_KEY", "")
+    AI_MODEL = os.getenv("AI_MODEL", "qwen-coder-plus")
 
 
 class DevelopmentConfig(Config):
