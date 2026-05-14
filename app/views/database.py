@@ -256,21 +256,23 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
     # 构建 schema 描述
     schema_desc = ""
     for table, columns in schema.items():
-        schema_desc += f"\n表名: {table}\n列: {', '.join(columns)}\n"
+        schema_desc += f"表名: {table}，列: {', '.join(columns)}\n"
 
-    prompt = f"""你是一个专业的 MySQL DBA，请根据以下数据库 schema 和用户描述生成对应的 SQL 查询语句。
+    prompt = f"""你是一个专业的 MySQL DBA，根据用户的中文描述生成对应的 SQL。
 
 数据库: {database}
-表结构信息:
+表结构:
 {schema_desc}
 
 用户描述: {text_input}
 
-要求：
-1. 仅使用 SELECT 查询（只读）
-2. 使用 MySQL 语法
-3. 只返回 SQL 语句，不要任何解释或 Markdown 格式
-4. 如果描述不清晰，生成一个最合理的 SELECT 查询"""
+规则:
+1. 只读操作：SELECT / DESC / DESCRIBE / SHOW / EXPLAIN
+2. 如果用户说"查看表结构/字段/列信息"，用 DESC 或 DESCRIBE
+3. 如果用户说"查询/列出/找出"，用 SELECT
+4. SELECT 查询中优先选择有意义的字段，避免 SELECT *（除非用户明确要求"所有"或"全部"）
+5. 使用 MySQL 语法，只返回纯 SQL，不要解释
+"""
 
     # 获取 API 配置
     api_key = current_app.config.get("AI_API_KEY", "")
@@ -290,7 +292,7 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         "model": model,
         "input": {
             "messages": [
-                {"role": "system", "content": "你是一个专业的 MySQL DBA，只返回 SQL 语句，不要解释。"},
+                {"role": "system", "content": "你是一个专业的 MySQL DBA。根据用户的中文描述生成 MySQL 只读 SQL。只返回纯 SQL，不要任何解释。"},
                 {"role": "user", "content": prompt},
             ]
         },
