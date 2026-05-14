@@ -271,11 +271,12 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
 规则:
 1. 只读操作：SELECT / DESC / DESCRIBE / SHOW / EXPLAIN
 2. "查看表结构/字段/列信息" → DESC 或 DESCRIBE 表名
-3. "最新一条/第一条" → ORDER BY 时间字段 DESC LIMIT 1（优先找 created_at/update_time/id 等字段）
+3. "最新一条/第一条" → ORDER BY 表中的时间字段 DESC LIMIT 1（必须使用 schema 中实际存在的列名，如 create_time/update_time，不要用 created_at 等不存在的字段）
 4. "最近 N 条/前 N 条" → ORDER BY 时间字段 DESC LIMIT N
 5. "所有/全部" → SELECT *，否则只列出关键业务字段
 6. 带条件的描述（如"某状态的数据"）→ 加 WHERE 子句
-7. 使用 MySQL 语法，只返回纯 SQL，不要解释
+7. 列名必须与上面 schema 中列出的完全一致，不能自己编造
+8. 使用 MySQL 语法，只返回纯 SQL，不要解释
 """
 
     # 获取 API 配置
@@ -309,7 +310,7 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
         # OpenAI 兼容格式解析
