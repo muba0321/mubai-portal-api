@@ -51,7 +51,8 @@ def _get_all_tables_with_columns(database: str):
             col_result = db.session.execute(
                 text(f"DESCRIBE `{database}`.`{table}`")
             )
-            schema[table] = [row[0] for row in col_result.fetchall()]
+            schema[table] = [{"name": row[0], "type": row[1], "key": row[3]}
+                             for row in col_result.fetchall()]
         return schema
     except Exception:
         return {}
@@ -256,7 +257,8 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
     # 构建 schema 描述
     schema_desc = ""
     for table, columns in schema.items():
-        schema_desc += f"表名: {table}，列: {', '.join(columns)}\n"
+        cols = [f"{c['name']}({c['type']})" + (" [PRI]" if c["key"] == "PRI" else "") for c in columns]
+        schema_desc += f"表名: {table}，列: {', '.join(cols)}\n"
 
     prompt = f"""你是一个专业的 MySQL DBA，根据用户的中文描述生成对应的 SQL。
 
@@ -268,10 +270,12 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
 
 规则:
 1. 只读操作：SELECT / DESC / DESCRIBE / SHOW / EXPLAIN
-2. 如果用户说"查看表结构/字段/列信息"，用 DESC 或 DESCRIBE
-3. 如果用户说"查询/列出/找出"，用 SELECT
-4. SELECT 查询中优先选择有意义的字段，避免 SELECT *（除非用户明确要求"所有"或"全部"）
-5. 使用 MySQL 语法，只返回纯 SQL，不要解释
+2. "查看表结构/字段/列信息" → DESC 或 DESCRIBE 表名
+3. "最新一条/第一条" → ORDER BY 时间字段 DESC LIMIT 1（优先找 created_at/update_time/id 等字段）
+4. "最近 N 条/前 N 条" → ORDER BY 时间字段 DESC LIMIT N
+5. "所有/全部" → SELECT *，否则只列出关键业务字段
+6. 带条件的描述（如"某状态的数据"）→ 加 WHERE 子句
+7. 使用 MySQL 语法，只返回纯 SQL，不要解释
 """
 
     # 获取 API 配置
