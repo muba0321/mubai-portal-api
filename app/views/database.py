@@ -254,29 +254,34 @@ def nl_to_sql():
 
 def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
     """调用 AI 模型生成 SQL"""
-    # 构建 schema 描述
+    # 构建 schema 描述 - 每行一个字段，清晰展示
     schema_desc = ""
     for table, columns in schema.items():
-        cols = [f"{c['name']}({c['type']})" + (" [PRI]" if c["key"] == "PRI" else "") for c in columns]
-        schema_desc += f"表名: {table}，列: {', '.join(cols)}\n"
+        schema_desc += f"\n### 表: {table}\n"
+        for c in columns:
+            pri = " PRIMARY KEY" if c["key"] == "PRI" else ""
+            schema_desc += f"  - {c['name']} {c['type']}{pri}\n"
 
-    prompt = f"""你是一个专业的 MySQL DBA，根据用户的中文描述生成对应的 SQL。
+    prompt = f"""你是一个专业的 MySQL DBA。根据用户描述生成 SQL。
 
 数据库: {database}
-表结构:
+
+可用表和字段:
 {schema_desc}
 
 用户描述: {text_input}
 
 规则:
 1. 只读操作：SELECT / DESC / DESCRIBE / SHOW / EXPLAIN
-2. "查看表结构/字段/列信息" → DESC 或 DESCRIBE 表名
-3. "最新一条/第一条" → ORDER BY 表中的时间字段 DESC LIMIT 1（必须使用 schema 中实际存在的列名，如 create_time/update_time，不要用 created_at 等不存在的字段）
-4. "最近 N 条/前 N 条" → ORDER BY 时间字段 DESC LIMIT N
-5. "所有/全部" → SELECT *，否则只列出关键业务字段
-6. 带条件的描述（如"某状态的数据"）→ 加 WHERE 子句
-7. 列名必须与上面 schema 中列出的完全一致，不能自己编造
-8. 使用 MySQL 语法，只返回纯 SQL，不要解释
+2. 查看表结构 → DESC 表名
+3. 最新/第一条 → ORDER BY 时间字段 DESC LIMIT 1
+4. 最近 N 条 → ORDER BY 时间字段 DESC LIMIT N
+5. 条件过滤 → WHERE 字段名 = '值'
+6. 模糊查询 → WHERE 字段名 LIKE '%值%'
+7. 聚合统计 → COUNT() / SUM() + GROUP BY 字段名
+8. 只使用上面列出的表和字段名
+9. 只返回纯 SQL，不要解释
+
 """
 
     # 获取 API 配置
@@ -287,6 +292,24 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         # 无 API Key 时降级为规则生成
         return _fallback_rule_sql(text_input, schema)
 
+    # 收集所有时间相关字段
+    time_fields = []
+    for table, columns in schema.items():
+        for c in columns:
+            if c["type"].lower().startswith(("datetime", "timestamp")):
+                time_fields.append(f"{table}.{c['name']}")
+
+    time_fields_hint = ""
+    if time_fields:
+        time_fields_hint = "\n可用时间字段（排序时必须使用）：\n" + "\n".join(f"  - {f}" for f in time_fields)
+
+    system_prompt = (
+        "你是一个专业的 MySQL DBA。根据用户描述生成 MySQL 只读 SQL。"
+        "严格使用 prompt 中提供的表和字段名，绝不编造任何字段。"
+        + time_fields_hint
+        + "\n只返回纯 SQL。"
+    )
+
     # 调用 DashScope Coding Plan API（OpenAI 兼容格式）
     url = "https://coding.dashscope.aliyuncs.com/v1/chat/completions"
     headers = {
@@ -296,7 +319,7 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是一个专业的 MySQL DBA。根据用户的中文描述生成 MySQL 只读 SQL。只返回纯 SQL，不要任何解释。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
@@ -310,7 +333,7 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=90) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
         # OpenAI 兼容格式解析
@@ -325,6 +348,9 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         sql = re.sub(r"\s*```$", "", sql)
         sql = sql.strip()
 
+        # 后处理：修正 AI 编造的列名
+        sql = _fix_column_names(sql, schema)
+
         return sql, f"AI 模型生成 ({model})"
 
     except urllib.error.HTTPError as e:
@@ -332,6 +358,35 @@ def _call_ai_for_sql(text_input: str, schema: dict, database: str) -> tuple:
         raise Exception(f"DashScope API 错误 ({e.code}): {err_body}")
     except urllib.error.URLError as e:
         raise Exception(f"无法连接 DashScope API: {e.reason}")
+
+
+def _fix_column_names(sql: str, schema: dict) -> str:
+    """后处理：修正 AI 编造的列名"""
+    common_fixes = {
+        "created_at": "create_time",
+        "updated_at": "update_time",
+        "modified_at": "update_time",
+        "created_time": "create_time",
+        "updated_time": "update_time",
+        "visited_at": "visit_time",
+        "last_login": "last_login_time",
+        "external_ip": "ip_address",
+        "internal_ip": "ip_address",
+        "user_name": "username",
+        "vm_name": "hostname",
+        "vm_ip": "ip_address",
+    }
+    all_real_columns = set()
+    for columns in schema.values():
+        for c in columns:
+            all_real_columns.add(c["name"])
+    for fake, real in common_fixes.items():
+        if fake.lower() in sql.lower() and real in all_real_columns:
+            idx = sql.lower().find(fake.lower())
+            while idx != -1:
+                sql = sql[:idx] + real + sql[idx + len(fake):]
+                idx = sql.lower().find(fake.lower(), idx + len(real))
+    return sql
 
 
 def _fallback_rule_sql(text: str, schema: dict) -> tuple:
