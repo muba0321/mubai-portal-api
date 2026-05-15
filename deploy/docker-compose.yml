@@ -5,11 +5,11 @@ version: '3.8'
 # 目录结构要求（服务器上 /data/sre-portal/）：
 #   /data/sre-portal/
 #   ├── docker-compose.yml          ← 本文件
-#   ├── backend/                    ← 后端源码（git clone 或同步）
+#   ├── portal-backend/             ← 后端源码（git clone）
 #   │   ├── Dockerfile
 #   │   ├── .env.production         ← 生产环境变量
 #   │   └── ...
-#   └── frontend/                   ← 前端源码（git clone 或同步）
+#   └── portal-frontend/            ← 前端源码（git clone）
 #       ├── Dockerfile
 #       ├── nginx.conf
 #       └── ...
@@ -21,15 +21,15 @@ version: '3.8'
 # 要求：外部 Docker 网络 mysql_sre-network 已存在（与 sre-portal-mysql 容器同网络）
 
 services:
-  # ─ 后端 ──
+  # ── 后端 ──
   backend:
     build:
-      context: ./backend
+      context: ./portal-backend
       dockerfile: Dockerfile
     container_name: portal-api
     restart: always
     env_file:
-      - ./backend/.env.production
+      - ./portal-backend/.env.production
     environment:
       FLASK_ENV: production
     networks:
@@ -44,7 +44,7 @@ services:
   # ── 前端 ──
   frontend:
     build:
-      context: ./frontend
+      context: ./portal-frontend
       dockerfile: Dockerfile
     container_name: portal-frontend
     restart: always
