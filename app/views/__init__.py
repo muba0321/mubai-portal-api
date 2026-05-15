@@ -3,6 +3,7 @@ from app.views.cmdb import cmdb_bp
 from app.views.dashboard import dashboard_bp
 from app.views.database import database_bp
 from app.views.system import system_bp
+from app.views.todo import todo_bp
 
 
 def register_blueprints(app):
@@ -11,3 +12,4 @@ def register_blueprints(app):
     app.register_blueprint(dashboard_bp, url_prefix="/api/v1/dashboard")
     app.register_blueprint(database_bp, url_prefix="/api/v1/database")
     app.register_blueprint(system_bp, url_prefix="/api/v1")
+    app.register_blueprint(todo_bp, url_prefix="/api/v1/todo")
