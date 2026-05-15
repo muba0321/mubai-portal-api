@@ -1,0 +1,32 @@
+version: '3.8'
+
+# SRE Portal 后端 — 服务器生产环境专用
+# 使用方式（服务器 /data/sre-portal 目录下）：
+#   docker compose -f backend/docker-compose.prod.yml up -d --build
+#
+# 要求：
+# 1. 后端源码已放在 /data/sre-portal/backend/
+# 2. 外部 Docker 网络 mysql_sre-network 已存在（与 sre-portal-mysql 同网络）
+# 3. 环境变量通过 .env.production 文件注入
+
+services:
+  portal-api:
+    build: .
+    container_name: portal-api
+    restart: always
+    env_file:
+      - .env.production
+    environment:
+      FLASK_ENV: production
+    networks:
+      - mysql_sre-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  mysql_sre-network:
+    external: true
