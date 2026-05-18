@@ -17,11 +17,11 @@ def clear():
 
 
 def refresh(db_session):
-    from app.models.setting import SysSetting
+    from app.models.config_entry import ConfigEntry
     clear()
-    for s in db_session.query(SysSetting.setting_key, SysSetting.setting_value).all():
-        if s.setting_value is not None:
-            _cache[s.setting_key] = s.setting_value
+    for c in db_session.query(ConfigEntry.config_key, ConfigEntry.config_value).all():
+        if c.config_value is not None:
+            _cache[c.config_key] = c.config_value
 
 
 def _parse_value(val: str):
