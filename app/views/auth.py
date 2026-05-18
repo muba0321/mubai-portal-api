@@ -1,11 +1,25 @@
 from flask import Blueprint, request
-from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required
-from werkzeug.security import check_password_hash
+from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required, get_jwt_identity
+from werkzeug.security import check_password_hash, generate_password_hash
 from app.extensions import db
 from app.models.sys import SysUser
 from app.utils.response import success, error
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _ensure_admin():
+    """确保管理员账号存在（启动时调用）"""
+    exists = SysUser.query.filter_by(username="mubai").first()
+    if not exists:
+        admin = SysUser(
+            username="mubai",
+            password_hash=generate_password_hash("huanxin0321"),
+            email="",
+            role="admin",
+        )
+        db.session.add(admin)
+        db.session.commit()
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -22,8 +36,8 @@ def login():
     refresh_token = create_refresh_token(identity=str(user.id))
 
     return success(data={
-        "access_token": access_token,
-        "refresh_token": refresh_token,
+        "accessToken": access_token,
+        "refreshToken": refresh_token,
     }, msg="登录成功")
 
 
@@ -43,7 +57,7 @@ def refresh_token_endpoint():
         return error(msg="Refresh token 无效", code="A0231")
 
     new_access_token = create_access_token(identity=user_id)
-    return success(data={"access_token": new_access_token})
+    return success(data={"accessToken": new_access_token})
 
 
 @auth_bp.route("/logout", methods=["POST"])

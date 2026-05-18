@@ -21,6 +21,11 @@ def create_app(env="development"):
 
     register_blueprints(app)
 
+    # 确保管理员账号存在
+    with app.app_context():
+        from app.views.auth import _ensure_admin
+        _ensure_admin()
+
     # 请求日志
     logger = logging.getLogger("sre-portal")
     logger.setLevel(logging.INFO)
