@@ -1,32 +1,73 @@
+import requests
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models.sys import SysMonitor, SysCommonLink, SysRecentVisit
 from app.utils.response import success
+from app.config import Config
+
+PROMETHEUS_URL = Config.__dict__.get(
+    "PROMETHEUS_URL",
+    "http://45.205.31.249:9090",
+)
 
 dashboard_bp = Blueprint("dashboard", __name__)
+
+
+def _prom_query(url, params=None, timeout=5):
+    try:
+        resp = requests.get(url, params=params, timeout=timeout)
+        return resp.json().get("data", {})
+    except Exception:
+        return {}
+
+
+def _extract_value(result, default=0):
+    if not result or "result" not in result:
+        return default
+    results = result["result"]
+    if not results:
+        return default
+    try:
+        return float(results[0]["value"][1])
+    except (ValueError, IndexError, TypeError):
+        return default
 
 
 @dashboard_bp.route("/system-status", methods=["GET"])
 @jwt_required()
 def system_status():
-    record = SysMonitor.query.order_by(SysMonitor.created_at.desc()).first()
-    if not record:
-        return success(data={
-            "server_online": 0, "service_running": 0,
-            "network_status": "normal", "storage_usage": "0%",
-            "alert_pending": 0, "cpu_load": "0%",
-            "last_updated": None,
-        })
+    """实时从 Prometheus 获取系统状态"""
+    # 服务器在线 (node-exporter target 中 up 的数量)
+    up_data = _prom_query(f"{PROMETHEUS_URL}/api/v1/query", {"query": 'up{job=~"app-node1|app-node2|gateway-server|cicd-server"}'})
+    server_online = sum(1 for t in up_data.get("result", []) if t.get("value") and float(t.get("value", [0, 0])[1]) == 1)
 
+    # 运行中的服务 (所有 up 的 target)
+    all_up = _prom_query(f"{PROMETHEUS_URL}/api/v1/query", {"query": 'up{job=~".*"}'})
+    service_running = sum(1 for t in all_up.get("result", []) if t.get("value") and float(t.get("value", [0, 0])[1]) == 1)
+
+    # 平均 CPU
+    cpu_data = _prom_query(f"{PROMETHEUS_URL}/api/v1/query",
+                           {"query": 'avg(100 - (rate(node_cpu_seconds_total{mode="idle"}[5m]) * 100))'})
+    cpu_load = round(_extract_value(cpu_data), 1)
+
+    # 平均磁盘
+    disk_data = _prom_query(f"{PROMETHEUS_URL}/api/v1/query",
+                            {"query": 'avg((1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100)'})
+    storage_usage = f"{round(_extract_value(disk_data), 1)}%"
+
+    # 告警数 (暂未接入 Alertmanager)
+    alert_pending = 0
+
+    from datetime import datetime
     return success(data={
-        "server_online": record.server_online,
-        "service_running": record.service_running,
-        "network_status": record.network_status,
-        "storage_usage": record.storage_usage,
-        "alert_pending": record.alert_pending,
-        "cpu_load": record.cpu_load,
-        "last_updated": record.snapshot_time,
+        "server_online": server_online,
+        "service_running": service_running,
+        "network_status": "normal" if server_online >= 3 else "warning",
+        "storage_usage": storage_usage,
+        "alert_pending": alert_pending,
+        "cpu_load": f"{cpu_load}%",
+        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
 

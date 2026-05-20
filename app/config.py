@@ -21,6 +21,9 @@ class Config:
     AI_API_KEY = os.getenv("AI_API_KEY", "")
     AI_MODEL = os.getenv("AI_MODEL", "qwen3.5-plus")
 
+    # Prometheus 监控数据源
+    PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://45.205.31.249:9090")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
