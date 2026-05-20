@@ -27,6 +27,7 @@ class SysCommonLink(db.Model):
     description = db.Column(db.String(300), nullable=True)
     url = db.Column(db.String(500), nullable=False)
     icon = db.Column(db.String(100), nullable=True)
+    category = db.Column(db.String(50), nullable=True)
     sort = db.Column(db.Integer, nullable=False, default=0)
     enabled = db.Column(db.SmallInteger, nullable=False, default=1)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)

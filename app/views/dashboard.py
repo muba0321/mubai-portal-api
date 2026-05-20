@@ -41,6 +41,7 @@ def common_links():
             "description": link.description,
             "url": link.url,
             "icon": link.icon,
+            "category": link.category,
             "sort": link.sort,
         }
         for link in links
@@ -57,6 +58,7 @@ def create_common_link():
         description=data.get("description", ""),
         url=data.get("url", ""),
         icon=data.get("icon", "Link"),
+        category=data.get("category"),
         sort=int(data.get("sort", 0)),
         enabled=1,
     )
@@ -77,6 +79,7 @@ def update_common_link(link_id):
     link.description = data.get("description", link.description)
     link.url = data.get("url", link.url)
     link.icon = data.get("icon", link.icon)
+    link.category = data.get("category", link.category)
     link.sort = int(data.get("sort", link.sort))
     link.enabled = int(data.get("enabled", link.enabled))
     db.session.commit()
@@ -93,6 +96,34 @@ def delete_common_link(link_id):
     db.session.delete(link)
     db.session.commit()
     return success(msg="删除成功")
+
+
+def _auto_categorize(title, url):
+    t = (title or "").lower()
+    u = (url or "").lower()
+    if any(k in t for k in ["监控", "grafana", "prometheus", "大盘", "告警"]):
+        return "监控工具"
+    if any(k in t for k in ["cmdb", "dns", "系统配置", "系统设置", "设置", "配置", "极客", "管理"]):
+        return "运维管理"
+    if any(k in t for k in ["coding", "开发", "openclaw", "ci", "jenkins", "git"]):
+        return "开发工具"
+    if any(k in t for k in ["文档", "资料", "飞书", "帮助", "help", "doc"]):
+        return "文档资料"
+    return "其他"
+
+
+@dashboard_bp.route("/common-links/auto-categorize", methods=["POST"])
+@jwt_required()
+def auto_categorize_links():
+    links = SysCommonLink.query.filter(SysCommonLink.category == None).all()
+    updated = 0
+    for link in links:
+        cat = _auto_categorize(link.title, link.url)
+        if cat != "其他":
+            link.category = cat
+            updated += 1
+    db.session.commit()
+    return success(data={"updated": updated})
 
 
 @dashboard_bp.route("/recent-visits", methods=["GET"])
