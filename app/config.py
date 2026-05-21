@@ -25,7 +25,7 @@ class Config:
     PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://45.205.31.249:9090")
 
     # Grafana 面板管理
-    GRAFANA_URL = os.getenv("GRAFANA_URL", "http://45.205.31.249:3000")
+    GRAFANA_URL = os.getenv("GRAFANA_URL", "http://45.205.31.249:3001")
     GRAFANA_API_KEY = os.getenv("GRAFANA_API_KEY", "")
 
 
