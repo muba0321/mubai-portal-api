@@ -1,11 +1,15 @@
 import time
 import requests
+from datetime import datetime, timedelta
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
 from app.config import Config
 from app.utils.response import success
 
 monitoring_bp = Blueprint("monitoring", __name__)
+
+# 北京时间偏移量
+BEIJING_TZ = timedelta(hours=8)
 
 PROMETHEUS_URL = Config.__dict__.get(
     "PROMETHEUS_URL",
@@ -96,9 +100,8 @@ def _to_echarts_series(data, name_map=None):
             except (ValueError, TypeError):
                 continue
         if not categories and values:
-            from datetime import datetime
             categories = [
-                datetime.fromtimestamp(ts).strftime("%H:%M")
+                (datetime.utcfromtimestamp(ts) + BEIJING_TZ).strftime("%m-%d %H:%M")
                 for ts, _ in values
             ]
         series.append({
