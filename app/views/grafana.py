@@ -11,11 +11,23 @@ from app.utils.response import success, error
 
 grafana_bp = Blueprint("grafana", __name__)
 
-# Grafana 配置
-GRAFANA_URL = getattr(Config, "GRAFANA_URL", "http://45.205.31.249:3001")
-GRAFANA_API_KEY = getattr(Config, "GRAFANA_API_KEY", "")
+# Grafana 配置（优先从数据库读取，fallback 到环境变量）
+def _get_grafana_config():
+    """从系统配置或环境变量获取 Grafana 连接信息"""
+    try:
+        from app.models.config_entry import ConfigEntry
+        url_entry = ConfigEntry.query.filter_by(config_key="grafana.url").first()
+        key_entry = ConfigEntry.query.filter_by(config_key="grafana.api_key").first()
+        return {
+            "url": url_entry.config_value if url_entry else getattr(Config, "GRAFANA_URL", "http://45.205.31.249:3001"),
+            "api_key": key_entry.config_value if key_entry else getattr(Config, "GRAFANA_API_KEY", ""),
+        }
+    except Exception:
+        return {
+            "url": getattr(Config, "GRAFANA_URL", "http://45.205.31.249:3001"),
+            "api_key": getattr(Config, "GRAFANA_API_KEY", ""),
+        }
 
-# 任务存储（内存，开发环境够用）
 _task_store: dict[str, dict] = {}
 
 
@@ -45,10 +57,11 @@ def jwt_from_query():
 
 def _grafana_request(method, path, **kwargs):
     """调用 Grafana HTTP API"""
-    url = f"{GRAFANA_URL}/api/{path}"
+    cfg = _get_grafana_config()
+    url = f"{cfg['url']}/api/{path}"
     headers = {"Content-Type": "application/json"}
-    if GRAFANA_API_KEY:
-        headers["Authorization"] = f"Bearer {GRAFANA_API_KEY}"
+    if cfg["api_key"]:
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
     try:
         resp = requests.request(method, url, headers=headers, timeout=10, **kwargs)
         return resp.status_code, resp.json() if resp.text else {}
