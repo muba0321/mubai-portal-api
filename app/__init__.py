@@ -29,6 +29,10 @@ def create_app(env="development"):
     # 请求日志
     logger = logging.getLogger("sre-portal")
     logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
 
     @app.before_request
     def log_request():
