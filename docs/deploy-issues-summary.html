@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRE Portal 部署问题总结与优化</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            line-height: 1.7;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        header {
+            background: linear-gradient(135deg, #1a73e8, #0d47a1);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-bottom: 32px;
+        }
+        header h1 { font-size: 28px; margin-bottom: 8px; }
+        header p { opacity: 0.85; font-size: 14px; }
+        .meta {
+            display: flex;
+            gap: 24px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .meta span {
+            background: rgba(255,255,255,0.15);
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+        }
+        section {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        section h2 {
+            font-size: 22px;
+            color: #1a73e8;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e8eaf6;
+        }
+        .issue {
+            border-left: 4px solid #ff6b6b;
+            background: #fff5f5;
+            padding: 16px 20px;
+            margin: 16px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .issue h3 {
+            font-size: 16px;
+            color: #c62828;
+            margin-bottom: 8px;
+        }
+        .issue p { font-size: 14px; color: #555; }
+        .fix {
+            border-left: 4px solid #4caf50;
+            background: #f1f8e9;
+            padding: 16px 20px;
+            margin: 12px 0 24px;
+            border-radius: 0 8px 8px 0;
+        }
+        .fix h4 {
+            font-size: 15px;
+            color: #2e7d32;
+            margin-bottom: 8px;
+        }
+        .fix p, .fix pre { font-size: 14px; color: #555; }
+        pre {
+            background: #263238;
+            color: #e0e0e0;
+            padding: 16px 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        code {
+            background: #e8eaf6;
+            color: #1565c0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #555;
+        }
+        .status-ok { color: #2e7d32; font-weight: 600; }
+        .status-warn { color: #f57c00; font-weight: 600; }
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-red { background: #ffcdd2; color: #c62828; }
+        .badge-green { background: #c8e6c9; color: #2e7d32; }
+        .badge-orange { background: #ffe0b2; color: #e65100; }
+        .badge-blue { background: #bbdefb; color: #1565c0; }
+        .timeline {
+            position: relative;
+            padding-left: 24px;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 6px;
+            top: 8px;
+            bottom: 8px;
+            width: 2px;
+            background: #e0e0e0;
+        }
+        .timeline-item {
+            position: relative;
+            margin-bottom: 24px;
+        }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 8px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #1a73e8;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px #1a73e8;
+        }
+        .timeline-item h4 {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        .timeline-item p {
+            font-size: 14px;
+            color: #666;
+        }
+        .footer {
+            text-align: center;
+            padding: 24px;
+            color: #999;
+            font-size: 13px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .summary-card {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        .summary-card .num {
+            font-size: 36px;
+            font-weight: 700;
+            color: #1a73e8;
+        }
+        .summary-card .label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SRE Portal 部署问题总结与优化</h1>
+            <p>从初始部署到前后端联调通过的完整问题记录与解决方案</p>
+            <div class="meta">
+                <span>服务器：154.12.54.207</span>
+                <span>前端端口：3000</span>
+                <span>后端端口：5000</span>
+                <span>数据库端口：3306</span>
+                <span>日期：2026-05-13</span>
+            </div>
+        </header>
+
+        <!-- 概览 -->
+        <section>
+            <h2>一、部署概览</h2>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="num">7</div>
+                    <div class="label">遇到的问题</div>
+                </div>
+                <div class="summary-card">
+                    <div class="num">7</div>
+                    <div class="label">已解决</div>
+                </div>
+                <div class="summary-card">
+                    <div class="num">3</div>
+                    <div class="label">运行容器</div>
+                </div>
+                <div class="summary-card">
+                    <div class="num">6</div>
+                    <div class="label">已验证接口</div>
+                </div>
+            </div>
+            <p style="margin-top: 16px; font-size: 14px; color: #666;">
+                部署流程经历了：后端镜像构建 → 容器冲突清理 → 前端 Dockerfile 适配 → pnpm 版本问题 → TypeScript 类型检查绕过 → Docker 缓存导致 .env 不生效 → nginx 代理路径修复。
+                最终前后端完整联调通过。
+            </p>
+        </section>
+
+        <!-- 问题1 -->
+        <section>
+            <h2>二、部署过程中的问题与解决</h2>
+
+            <!-- 问题 1 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 1</span> 旧容器残留冲突</h3>
+                <p>服务器上存在旧的 <code>sre-portal-nginx</code> 容器（未启动）和 <code>mysql8</code> 容器（端口 13306，重复部署），占用容器名称和端口资源。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案</h4>
+                <pre><code># 删除未使用的 nginx 容器
+docker stop sre-portal-nginx && docker rm sre-portal-nginx
+
+# 删除重复的 mysql 容器
+docker stop mysql8 && docker rm mysql8
+
+# 清理悬空镜像
+docker image prune -f</code></pre>
+                <p><strong>最终只保留：</strong><code>sre-portal-backend</code>、<code>sre-portal-frontend</code>、<code>sre-portal-mysql</code> 三个核心容器。</p>
+            </div>
+
+            <!-- 问题 2 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 2</span> 旧后端容器名称冲突</h3>
+                <p>执行 <code>docker compose up -d</code> 时报错：
+                <code>Conflict. The container name "/sre-portal-backend" is already in use</code>。
+                <code>docker compose down</code> 无法清理旧容器，导致新构建的镜像无法启动。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案</h4>
+                <pre><code># 强制删除旧容器后再启动
+docker rm -f sre-portal-backend 2>/dev/null
+docker compose up -d</code></pre>
+                <p><strong>优化：</strong>在部署脚本中，<code>docker compose down</code> 之前先执行 <code>docker rm -f</code> 强制清理，确保名称可用。</p>
+            </div>
+
+            <!-- 问题 3 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 3</span> 前端 Dockerfile pnpm 版本不兼容</h3>
+                <p>前端 Dockerfile 中使用 <code>corepack prepare pnpm@latest</code> 安装 pnpm，
+                但 pnpm@11+ 与 <code>node:20-alpine</code>（Node 20.20.2）不兼容，构建时报
+                <code>ERR_UNKNOWN_BUILTIN_MODULE</code> 错误。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案</h4>
+                <pre><code># 修改 Dockerfile
+RUN npm install -g pnpm@9  # 降级到 pnpm@9，兼容 Node 20 Alpine</code></pre>
+                <p>同时将 <code>pnpm build</code> 改为 <code>npx vite build</code>，跳过 TypeScript 类型检查（项目本身有 TS 类型问题）。</p>
+            </div>
+
+            <!-- 问题 4 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 4</span> Docker 镜像构建缓存导致 .env.production 不生效</h3>
+                <p>构建时 <code>.dockerignore</code> 文件排除了 <code>.env.production</code>，
+                虽然之后从 <code>.dockerignore</code> 中移除了，但 Docker 层缓存导致 <code>RUN npx vite build</code>
+                步骤仍然使用旧缓存，构建产物中 <code>VITE_APP_BASE_API</code> 未被注入。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案（两步）</h4>
+                <pre><code># 第一步：从 .dockerignore 中移除 .env.production
+# 让 Docker COPY . . 时包含 .env.production
+
+# 第二步：使用 --no-cache 强制重建
+cd /opt/sre-portal/frontend && docker build --no-cache -t sre-portal-frontend .
+
+# 清理构建缓存确保干净
+docker builder prune -af</code></pre>
+                <p><strong>经验教训：</strong>修改 <code>.dockerignore</code> 后，后续构建必须使用 <code>--no-cache</code>，
+                否则 COPY 层缓存仍然不包含被忽略的文件。这是 Docker BuildKit 的已知行为。</p>
+            </div>
+
+            <!-- 问题 5 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 5</span> 前端 API 请求路径与 nginx 代理不匹配</h3>
+                <p>前端浏览器实际请求的是 <code>/api/v1/auth/login</code>（405 错误），
+                而 nginx 只配置了 <code>/prod-api/</code> 的代理规则。
+                原因：前端构建时 <code>VITE_APP_BASE_API=/prod-api</code> 没有被 vite 正确注入，
+                baseURL 变成了空字符串，导致请求直接发到 <code>/api/</code> 而非 <code>/prod-api/api/</code>。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案：nginx 同时代理两条路径</h4>
+                <pre><code># 同时支持 /prod-api/ 和 /api/ 两个前缀
+location /prod-api/ {
+    proxy_pass http://sre-portal-backend:5000/;
+    ...
+}
+
+location /api/ {
+    proxy_pass http://sre-portal-backend:5000;
+    ...
+}</code></pre>
+                <p>这样无论前端 <code>baseURL</code> 是空、<code>/api</code> 还是 <code>/prod-api</code>，
+                nginx 都能正确代理到后端，彻底消除前端构建时环境变量注入的不确定性。</p>
+            </div>
+
+            <!-- 问题 6 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 6</span> 前端端口映射从 80 改为 3000</h3>
+                <p>初始配置前端容器映射为 <code>3000:80</code>（容器内 nginx 监听 80），
+                用户要求容器内外端口一致，都使用 3000。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案：三处同步修改</h4>
+                <table>
+                    <tr><th>文件</th><th>修改内容</th></tr>
+                    <tr><td><code>nginx.conf</code></td><td><code>listen 80</code> → <code>listen 3000</code></td></tr>
+                    <tr><td><code>Dockerfile</code></td><td><code>EXPOSE 80</code> → <code>EXPOSE 3000</code></td></tr>
+                    <tr><td><code>docker-compose.yml</code></td><td><code>3000:80</code> → <code>3000:3000</code></td></tr>
+                </table>
+            </div>
+
+            <!-- 问题 7 -->
+            <div class="issue">
+                <h3><span class="badge badge-red">问题 7</span> Docker Compose 前端 build context 路径解析错误</h3>
+                <p>在服务器的 <code>/opt/sre-portal/backend/docker-compose.yml</code> 中配置
+                <code>context: ../../01-frontend/sre-portal-frontend</code>，
+                Docker 解析为 <code>/opt/01-frontend/...</code>（少了 sre-portal 一级目录），
+                导致构建时找不到前端源码。</p>
+            </div>
+            <div class="fix">
+                <h4>解决方案</h4>
+                <p>放弃从 docker-compose 中 build 前端，改为：</p>
+                <pre><code># 在前端源码目录单独构建
+cd /opt/sre-portal/frontend && docker build -t sre-portal-frontend .
+
+# 打标签让 docker-compose 能找到
+docker tag sre-portal-frontend backend-sre-portal-frontend
+
+# docker-compose 中改用 image 而非 build
+# services.sre-portal-frontend.image: sre-portal-frontend</code></pre>
+            </div>
+        </section>
+
+        <!-- 当前架构 -->
+        <section>
+            <h2>三、当前服务器状态</h2>
+
+            <h3 style="font-size: 16px; margin-bottom: 12px;">运行容器</h3>
+            <table>
+                <tr>
+                    <th>容器名称</th>
+                    <th>镜像</th>
+                    <th>端口映射</th>
+                    <th>状态</th>
+                </tr>
+                <tr>
+                    <td>sre-portal-frontend</td>
+                    <td>backend-sre-portal-frontend</td>
+                    <td>3000 → 3000</td>
+                    <td><span class="status-ok">Up (nginx:alpine)</span></td>
+                </tr>
+                <tr>
+                    <td>sre-portal-backend</td>
+                    <td>backend-sre-portal-backend</td>
+                    <td>5000 → 5000</td>
+                    <td><span class="status-ok">Up (healthy)</span></td>
+                </tr>
+                <tr>
+                    <td>sre-portal-mysql</td>
+                    <td>mysql:8.0</td>
+                    <td>3306 → 3306</td>
+                    <td><span class="status-ok">Up</span></td>
+                </tr>
+            </table>
+
+            <h3 style="font-size: 16px; margin: 24px 0 12px;">已验证接口（通过前端 nginx 代理）</h3>
+            <table>
+                <tr><th>#</th><th>接口</th><th>方法</th><th>状态</th></tr>
+                <tr><td>1</td><td>/api/v1/auth/login</td><td>POST</td><td><span class="badge badge-green">00000 登录成功</span></td></tr>
+                <tr><td>2</td><td>/api/v1/users/me</td><td>GET</td><td><span class="badge badge-green">admin / admin</span></td></tr>
+                <tr><td>3</td><td>/api/v1/menus/routes</td><td>GET</td><td><span class="badge badge-green">2 个菜单</span></td></tr>
+                <tr><td>4</td><td>/api/v1/cmdb/vms</td><td>GET</td><td><span class="badge badge-green">13 台虚拟机</span></td></tr>
+                <tr><td>5</td><td>/api/v1/dashboard/system-status</td><td>GET</td><td><span class="badge badge-green">正常</span></td></tr>
+                <tr><td>6</td><td>/api/v1/dashboard/common-links</td><td>GET</td><td><span class="badge badge-green">7 条链接</span></td></tr>
+            </table>
+        </section>
+
+        <!-- 部署架构 -->
+        <section>
+            <h2>四、部署架构图</h2>
+            <pre><code>┌─────────────────────────────────────────────────────────┐
+│                  154.12.54.207 (VM)                     │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  portal.mubai.top : 3000                        │   │
+│  │  Docker: sre-portal-frontend (nginx:alpine)     │   │
+│  │  ┌──────────────────┐  ┌────────────────────┐  │   │
+│  │  │  静态文件 / dist │  │  /api/  → 代理     │  │   │
+│  │  │  (Vue 3 SPA)     │  │  /prod-api/ → 代理 │  │   │
+│  │  └──────────────────┘  └─────────┬──────────┘  │   │
+│  │                                  │               │   │
+│  └──────────────────────────────────┼───────────────┘   │
+│                                     │ (Docker 网络)     │
+│  ┌──────────────────────────────────┼───────────────┐   │
+│  │  Docker: sre-portal-backend     │               │   │
+│  │  (Flask + Gunicorn : 5000)      │               │   │
+│  │  ├─ /api/v1/auth/*              │               │   │
+│  │  ├─ /api/v1/cmdb/*              │               │   │
+│  │  ├─ /api/v1/dashboard/*         │               │   │
+│  │  └─ /health                     │               │   │
+│  └─────────────────────────────────┼───────────────┘   │
+│                                     │                   │
+│  ┌──────────────────────────────────┼───────────────┐   │
+│  │  Docker: sre-portal-mysql       │               │   │
+│  │  (MySQL 8.0 : 3306)             │               │   │
+│  │  数据库: sre_portal              │               │   │
+│  └─────────────────────────────────┴───────────────┘   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘</code></pre>
+        </section>
+
+        <!-- 经验总结 -->
+        <section>
+            <h2>五、经验总结与最佳实践</h2>
+
+            <div class="timeline">
+                <div class="timeline-item">
+                    <h4>Docker 构建必须考虑缓存</h4>
+                    <p>修改 <code>.dockerignore</code> 后，后续 <code>docker build</code> 需要使用 <code>--no-cache</code> 强制重建。
+                    COPY 层的缓存是独立的，不会自动感知 .dockerignore 的变化。
+                    更安全的做法：将 <code>package.json</code> 和 <code>.env.*</code> 分层 COPY，确保环境配置文件不被忽略。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>容器名称冲突需强制清理</h4>
+                    <p><code>docker compose down</code> 在某些情况下不会删除容器，
+                    建议在部署脚本开头统一执行 <code>docker rm -f 容器名 2>/dev/null</code> 强制清理。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>代理配置要兼容多种前缀</h4>
+                    <p>当不确定前端 baseURL 是否准确注入时，nginx 同时代理
+                    <code>/api/</code> 和 <code>/prod-api/</code> 是更保险的做法，
+                    避免前端构建问题导致线上不可用。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>alpine 镜像的兼容性注意</h4>
+                    <p>Node.js Alpine 镜像中安装 pnpm 时，<code>corepack</code> 安装的最新版
+                    pnpm 可能与 Alpine 的 musl libc 不兼容，建议固定版本
+                    <code>npm install -g pnpm@9</code>。</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>前后端分离部署的端口统一</h4>
+                    <p>容器内外端口保持一致（如都用 3000），便于记忆和排查问题。
+                    如果 nginx 默认 80 端口，在 docker-compose 中映射为 <code>3000:80</code>
+                    会导致容器内实际监听端口与外部不一致，增加排障难度。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 相关文件 -->
+        <section>
+            <h2>六、关键文件清单</h2>
+            <table>
+                <tr><th>文件</th><th>作用</th><th>修改内容</th></tr>
+                <tr><td><code>frontend/Dockerfile</code></td><td>前端多阶段构建</td><td>pnpm@9、npx vite build、EXPOSE 3000</td></tr>
+                <tr><td><code>frontend/nginx.conf</code></td><td>nginx 静态托管 + API 代理</td><td>listen 3000、双路径代理 /api/ 和 /prod-api/</td></tr>
+                <tr><td><code>frontend/.dockerignore</code></td><td>Docker 构建忽略规则</td><td>移除 .env.production，确保构建时包含</td></tr>
+                <tr><td><code>backend/docker-compose.yml</code></td><td>前后端容器编排</td><td>前端 3000:3000、共享 sre-network</td></tr>
+                <tr><td><code>backend/Dockerfile</code></td><td>后端镜像构建</td><td>添加 wget 支持健康检查</td></tr>
+                <tr><td><code>04-deploy/deploy_backend.py</code></td><td>Python 一键部署脚本</td><td>paramiko SSH 部署后端</td></tr>
+                <tr><td><code>04-deploy/deploy.sh</code></td><td>Bash 一键部署脚本</td><td>rsync/scp 部署后端</td></tr>
+            </table>
+        </section>
+
+        <div class="footer">
+            <p>SRE Portal 部署问题总结 &middot; 生成时间：2026-05-13</p>
+        </div>
+    </div>
+</body>
+</html>

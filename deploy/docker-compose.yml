@@ -1,0 +1,60 @@
+version: '3.8'
+
+# SRE Portal 服务器统一部署编排文件
+#
+# 目录结构要求（服务器上 /data/sre-portal/）：
+#   /data/sre-portal/
+#   ├── docker-compose.yml          ← 本文件
+#   ├── portal-backend/             ← 后端源码（git clone）
+#   │   ├── Dockerfile
+#   │   ├── .env.production         ← 生产环境变量
+#   │   └── ...
+#   └── portal-frontend/            ← 前端源码（git clone）
+#       ├── Dockerfile
+#       ├── nginx.conf
+#       └── ...
+#
+# 部署命令：
+#   cd /data/sre-portal
+#   docker compose up -d --build
+#
+# 要求：外部 Docker 网络 mysql_sre-network 已存在（与 sre-portal-mysql 容器同网络）
+
+services:
+  # ── 后端 ──
+  backend:
+    build:
+      context: ./portal-backend
+      dockerfile: Dockerfile
+    container_name: portal-api
+    restart: always
+    env_file:
+      - ./portal-backend/.env.production
+    environment:
+      FLASK_ENV: production
+    networks:
+      - mysql_sre-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── 前端 ──
+  frontend:
+    build:
+      context: ./portal-frontend
+      dockerfile: Dockerfile
+    container_name: portal-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - mysql_sre-network
+
+networks:
+  mysql_sre-network:
+    external: true

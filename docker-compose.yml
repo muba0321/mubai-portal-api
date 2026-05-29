@@ -1,0 +1,51 @@
+# ============================================================
+# 本地开发用 docker-compose.yml
+# 注意：此文件仅用于本地开发/调试（frontend build context 依赖本地路径）
+# 生产环境请使用 04-deploy/docker-compose.yml 配合 deploy_backend.py 部署
+# ============================================================
+
+version: '3.8'
+
+services:
+  sre-portal-frontend:
+    build:
+      context: ../../01-frontend/sre-portal-frontend
+      dockerfile: Dockerfile
+    container_name: sre-portal-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - sre-portal-backend
+    networks:
+      - sre-network
+
+  sre-portal-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sre-portal-backend
+    restart: always
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://root:huanxin0321@154.12.54.207:3306/sre_portal}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_EXPIRES: ${JWT_EXPIRES:-3600}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-604800}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-qwen3.5-plus}
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sre-network
+
+networks:
+  sre-network:
+    driver: bridge
