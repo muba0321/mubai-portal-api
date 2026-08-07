@@ -9,7 +9,7 @@ pipeline {
         GIT_BRANCH = 'main'
         DEPLOY_HOST = '154.201.73.215'
         DEPLOY_USER = 'root'
-        APP_DIR = '/opt/sre-portal'
+        APP_DIR = '/opt/jenkins-agent'
         CONTAINER_NAME = 'sre-portal-backend'
     }
 
