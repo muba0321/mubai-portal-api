@@ -40,6 +40,12 @@ pipeline {
                     docker compose up -d --build sre-portal-backend
                     sleep 5
 
+                    # 运行初始化脚本（复制 SSH 密钥等）
+                    if [ -f deploy/init-container.sh ]; then
+                        chmod +x deploy/init-container.sh
+                        ./deploy/init-container.sh
+                    fi
+
                     # 健康检查
                     for i in $(seq 1 10); do
                         if curl -sf http://localhost:5000/health > /dev/null; then
