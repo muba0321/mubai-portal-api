@@ -35,9 +35,11 @@ pipeline {
             steps {
                 echo '=== 部署后端 ==='
                 sh '''
-                    cd ${APP_DIR}
+                    # 重建后端容器（使用 /opt/sre-portal 的 docker-compose）
+                    cd /opt/sre-portal
                     docker compose up -d --build sre-portal-backend
                     sleep 5
+
                     # 健康检查
                     for i in $(seq 1 10); do
                         if curl -sf http://localhost:5000/health > /dev/null; then
