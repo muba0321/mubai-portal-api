@@ -5,8 +5,9 @@ import requests
 from urllib import request as urllib_request
 from functools import wraps
 from flask import Blueprint, request, current_app, jsonify
-from flask_jwt_extended import jwt_required, decode_token
+from flask_jwt_extended import jwt_required, decode_token, get_jwt_identity
 from app.config import Config
+from app.extensions import db
 from app.utils.response import success, error
 
 grafana_bp = Blueprint("grafana", __name__)
@@ -19,12 +20,12 @@ def _get_grafana_config():
         url_entry = ConfigEntry.query.filter_by(config_key="grafana.url").first()
         key_entry = ConfigEntry.query.filter_by(config_key="grafana.api_key").first()
         return {
-            "url": url_entry.config_value if url_entry else getattr(Config, "GRAFANA_URL", "http://45.205.31.249:3001"),
+            "url": url_entry.config_value if url_entry else getattr(Config, "GRAFANA_URL", "http://154.12.54.207:3000"),
             "api_key": key_entry.config_value if key_entry else getattr(Config, "GRAFANA_API_KEY", ""),
         }
     except Exception:
         return {
-            "url": getattr(Config, "GRAFANA_URL", "http://45.205.31.249:3001"),
+            "url": getattr(Config, "GRAFANA_URL", "http://154.12.54.207:3000"),
             "api_key": getattr(Config, "GRAFANA_API_KEY", ""),
         }
 
@@ -403,6 +404,30 @@ def _call_ai_for_panel(dashboard, description, operation, template_var_names, ex
 
 import uuid
 
+
+def _save_ai_history(dashboard_uid, dashboard_title, operation, description, result, user_id, username, status="success", error_msg=None):
+    """保存 AI 生成记录到数据库"""
+    try:
+        from app.models.grafana_ai_history import GrafanaAiHistory
+        history = GrafanaAiHistory(
+            dashboard_uid=dashboard_uid,
+            dashboard_title=dashboard_title,
+            operation=operation,
+            description=description,
+            panel_json=result.get("panelJson") if result else None,
+            explanation=result.get("explanation") if result else None,
+            status=status,
+            error_msg=error_msg,
+            user_id=user_id,
+            username=username,
+        )
+        db.session.add(history)
+        db.session.commit()
+    except Exception as e:
+        current_app.logger.error(f"保存 AI 生成记录失败: {e}")
+        db.session.rollback()
+
+
 @grafana_bp.route("/nl-to-panel", methods=["POST"])
 @jwt_required()
 def nl_to_panel_start():
@@ -419,6 +444,30 @@ def nl_to_panel_start():
     if operation not in ("add", "modify", "delete"):
         return error(msg="operation 必须是 add/modify/delete", code="40003")
 
+    # 获取当前用户信息
+    user_id = get_jwt_identity()
+    if isinstance(user_id, str):
+        user_id = int(user_id)
+    username = ""
+    try:
+        from app.models.sys_user import SysUser
+        user = SysUser.query.get(user_id)
+        if user:
+            username = user.username or ""
+    except Exception:
+        pass
+
+    # 获取仪表盘标题
+    dashboard_uid = data.get("dashboard_uid", "")
+    dashboard_title = ""
+    if dashboard_uid:
+        try:
+            code, dash_data = _grafana_request("GET", f"dashboards/uid/{dashboard_uid}")
+            if code == 200:
+                dashboard_title = dash_data.get("dashboard", {}).get("title", "")
+        except Exception:
+            pass
+
     task_id = str(uuid.uuid4())[:8]
     _task_store[task_id] = {
         "id": task_id,
@@ -431,7 +480,7 @@ def nl_to_panel_start():
 
     # 同步执行任务管道（AI 调用通常 60-90 秒）
     _run_task_pipeline(task_id, {
-        "dashboard_uid": data.get("dashboard_uid", ""),
+        "dashboard_uid": dashboard_uid,
         "panel_id": data.get("panel_id"),
         "description": description,
         "operation": operation,
@@ -439,7 +488,12 @@ def nl_to_panel_start():
 
     task = _task_store[task_id]
     if task["status"] == "error":
+        # 保存失败记录
+        _save_ai_history(dashboard_uid, dashboard_title, operation, description, None, user_id, username, status="error", error_msg="AI 生成失败")
         return error(msg="AI 生成失败，请重试", code="50001")
+
+    # 保存成功记录
+    _save_ai_history(dashboard_uid, dashboard_title, operation, description, task["result"], user_id, username)
 
     return success(data=task["result"], msg="AI 生成完成")
 
@@ -595,4 +649,94 @@ def delete_folder(folder_id):
     code, data = _grafana_request("DELETE", f"folders/id/{folder_id}")
     if code != 200:
         return error(msg=f"删除文件夹失败: {data}", code=str(code))
+    return success(msg="删除成功")
+
+
+# ==================== AI 生成记录 ====================
+
+@grafana_bp.route("/ai-history", methods=["GET"])
+@jwt_required()
+def list_ai_history():
+    """获取 AI 生成记录列表（分页 + 搜索）"""
+    from app.models.grafana_ai_history import GrafanaAiHistory
+
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("pageSize", 10, type=int)
+    keyword = request.args.get("keyword", "").strip()
+    dashboard_uid = request.args.get("dashboardUid", "").strip()
+
+    q = GrafanaAiHistory.query
+
+    if keyword:
+        kw = f"%{keyword}%"
+        q = q.filter(
+            db.or_(
+                GrafanaAiHistory.description.like(kw),
+                GrafanaAiHistory.dashboard_title.like(kw),
+                GrafanaAiHistory.explanation.like(kw),
+            )
+        )
+    if dashboard_uid:
+        q = q.filter_by(dashboard_uid=dashboard_uid)
+
+    total = q.count()
+    items = q.order_by(GrafanaAiHistory.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    result = []
+    for item in items:
+        result.append({
+            "id": item.id,
+            "dashboard_uid": item.dashboard_uid,
+            "dashboard_title": item.dashboard_title,
+            "operation": item.operation,
+            "description": item.description,
+            "explanation": item.explanation,
+            "status": item.status,
+            "error_msg": item.error_msg,
+            "user_id": item.user_id,
+            "username": item.username,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else None,
+        })
+
+    return success(data={"list": result, "total": total})
+
+
+@grafana_bp.route("/ai-history/<int:history_id>", methods=["GET"])
+@jwt_required()
+def get_ai_history_detail(history_id):
+    """获取 AI 生成记录详情"""
+    from app.models.grafana_ai_history import GrafanaAiHistory
+
+    item = GrafanaAiHistory.query.get(history_id)
+    if not item:
+        return error(msg="记录不存在", code="40401")
+
+    return success(data={
+        "id": item.id,
+        "dashboard_uid": item.dashboard_uid,
+        "dashboard_title": item.dashboard_title,
+        "operation": item.operation,
+        "description": item.description,
+        "panel_json": item.panel_json,
+        "explanation": item.explanation,
+        "status": item.status,
+        "error_msg": item.error_msg,
+        "user_id": item.user_id,
+        "username": item.username,
+        "created_at": item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else None,
+    })
+
+
+@grafana_bp.route("/ai-history/<int:history_id>", methods=["DELETE"])
+@jwt_required()
+def delete_ai_history(history_id):
+    """删除 AI 生成记录"""
+    from app.models.grafana_ai_history import GrafanaAiHistory
+
+    item = GrafanaAiHistory.query.get(history_id)
+    if not item:
+        return error(msg="记录不存在", code="40401")
+
+    db.session.delete(item)
+    db.session.commit()
     return success(msg="删除成功")

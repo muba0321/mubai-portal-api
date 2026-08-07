@@ -29,7 +29,17 @@ def create_app(env="development"):
 
     register_blueprints(app)
 
-    # 确保管理员账号存在（表不存在时跳过，等 migrate 后再执行）
+    # 打印配置源信息
+    logger = logging.getLogger("sre-portal")
+    with app.app_context():
+        try:
+            from app.utils.config_manager import get_config_status
+            status = get_config_status()
+            logger.info(f"Config source: {status['current_source']}, "
+                       f"Apollo: {'connected' if status['apollo_connected'] else 'disabled'}, "
+                       f"configs: {status['apollo_config_count']}")
+        except Exception as e:
+            logger.debug(f"Config source info: {e}")
     with app.app_context():
         try:
             from app.views.auth import _ensure_admin
@@ -62,5 +72,12 @@ def create_app(env="development"):
     @app.errorhandler(500)
     def internal_error(e):
         return {"code": "50000", "data": None, "msg": "系统内部错误"}, 500
+
+    # 启动定时任务调度器
+    try:
+        from app.utils.task_scheduler import init_scheduler
+        init_scheduler(app)
+    except Exception as e:
+        logger.warning(f"调度器启动失败: {e}")
 
     return app

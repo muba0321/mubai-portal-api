@@ -16,6 +16,8 @@ from app.views.sys_role import sys_role_bp
 from app.views.sys_menu import sys_menu_bp
 from app.views.sys_log import sys_log_bp
 from app.views.approval import approval_bp
+# 配置源管理
+from app.views.config_source import config_source_bp
 
 
 def register_blueprints(app):
@@ -38,3 +40,5 @@ def register_blueprints(app):
     app.register_blueprint(sys_log_bp, url_prefix="/api/v1/logs")
     # 审批流
     app.register_blueprint(approval_bp, url_prefix="/api/v1/approvals")
+    # 配置源管理
+    app.register_blueprint(config_source_bp)

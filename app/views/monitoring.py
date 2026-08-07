@@ -13,23 +13,21 @@ BEIJING_TZ = timedelta(hours=8)
 
 PROMETHEUS_URL = Config.__dict__.get(
     "PROMETHEUS_URL",
-    "http://45.205.31.249:9090",
+    "http://154.12.54.207:9090",
 )
 
 # Prometheus instance label -> 服务器元数据
 SERVER_META = {
-    "app-node1": {"name": "应用服务器", "ip": "154.12.54.207", "os": "CentOS 7"},
-    "app-node2": {"name": "应用服务器-备", "ip": "154.201.73.129", "os": "CentOS 7"},
-    "gateway-server": {"name": "Nginx 网关", "ip": "38.246.245.32", "os": "Ubuntu 22.04"},
-    "cicd-server": {"name": "CI/CD & 监控", "ip": "45.205.31.249", "os": "CentOS 7"},
+    "154.201.73.215:9100": {"name": "应用服务器", "ip": "154.201.73.215", "os": "Ubuntu 22.04"},
+    "154.12.54.207:9100": {"name": "监控服务器", "ip": "154.12.54.207", "os": "Ubuntu 22.04"},
+    "38.246.245.32:9100": {"name": "Nginx 网关", "ip": "38.246.245.32", "os": "Ubuntu 22.04"},
 }
 
 # 服务映射
 INSTANCE_SERVICES = {
-    "app-node1": ["sre-portal-frontend", "sre-portal-backend", "sre-portal-mysql", "node-exporter", "mysqld-exporter"],
-    "app-node2": ["node-exporter", "mysqld-exporter"],
-    "gateway-server": ["nginx", "openclaw", "node-exporter"],
-    "cicd-server": ["jenkins", "prometheus", "grafana", "node-exporter"],
+    "154.201.73.215:9100": ["sre-portal-frontend", "sre-portal-backend", "sre-portal-mysql", "node-exporter", "cadvisor"],
+    "154.12.54.207:9100": ["prometheus", "grafana", "mysql", "node-exporter", "mysql-exporter"],
+    "38.246.245.32:9100": ["nginx", "node-exporter", "nginx-exporter"],
 }
 
 
@@ -181,6 +179,15 @@ def get_targets():
 @monitoring_bp.route("/servers")
 @jwt_required()
 def get_servers():
+    # 通过 Prometheus up 指标判断在线状态
+    up_data = _prom_query('up{job="node-exporter"}')
+    online_instances = set()
+    for r in up_data.get("result", []):
+        inst = r.get("metric", {}).get("instance", "")
+        val = r.get("value", [0, "0"])[1] if r.get("value") else "0"
+        if val == "1":
+            online_instances.add(inst)
+
     servers = []
     for instance, meta in SERVER_META.items():
         cpu_vals = _query_by_instance('100 - (rate(node_cpu_seconds_total{{instance="{instance}",mode="idle"}}[5m]) * 100)')
@@ -188,10 +195,13 @@ def get_servers():
         disk_vals = _query_by_instance('(1 - node_filesystem_avail_bytes{{instance="{instance}",mountpoint="/"}} / node_filesystem_size_bytes{{instance="{instance}",mountpoint="/"}}) * 100')
         load_vals = _query_by_instance('node_load1{{instance="{instance}"}}')
 
+        online = instance in online_instances
+
         servers.append({
             "name": meta["name"],
             "ip": meta["ip"],
             "os": meta["os"],
+            "online": online,
             "cpu": round(cpu_vals.get(instance, 0), 1),
             "memory": round(mem_vals.get(instance, 0), 1),
             "disk": round(disk_vals.get(instance, 0), 1),
@@ -264,22 +274,22 @@ def get_network_metrics():
 @monitoring_bp.route("/mysql")
 @jwt_required()
 def get_mysql_metrics():
-    conn_data = _prom_query('mysql_global_status_threads_connected{instance="mysql-master"}')
+    conn_data = _prom_query('mysql_global_status_threads_connected{instance="154.12.54.207:9104"}')
     connections = int(_extract_value(conn_data))
 
-    qps_data = _prom_query('rate(mysql_global_status_queries{instance="mysql-master"}[5m])')
+    qps_data = _prom_query('rate(mysql_global_status_queries{instance="154.12.54.207:9104"}[5m])')
     qps = round(_extract_value(qps_data), 1)
 
-    slow_data = _prom_query('mysql_global_status_slow_queries{instance="mysql-master"}')
+    slow_data = _prom_query('mysql_global_status_slow_queries{instance="154.12.54.207:9104"}')
     slow = int(_extract_value(slow_data))
 
-    run_data = _prom_query('mysql_global_status_threads_running{instance="mysql-master"}')
+    run_data = _prom_query('mysql_global_status_threads_running{instance="154.12.54.207:9104"}')
     running = int(_extract_value(run_data))
 
-    max_conn_data = _prom_query('mysql_global_variables_max_connections{instance="mysql-master"}')
+    max_conn_data = _prom_query('mysql_global_variables_max_connections{instance="154.12.54.207:9104"}')
     max_conn = int(_extract_value(max_conn_data, 151))
 
-    uptime_data = _prom_query('mysql_global_status_uptime{instance="mysql-master"}')
+    uptime_data = _prom_query('mysql_global_status_uptime{instance="154.12.54.207:9104"}')
     uptime = int(_extract_value(uptime_data))
 
     return success(data={
