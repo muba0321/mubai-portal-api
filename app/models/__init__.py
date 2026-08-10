@@ -3,6 +3,7 @@ from app.models.sys import SysMonitor, SysCommonLink, SysRecentVisit
 from app.models.sys_user import SysUser
 from app.models.setting import SysSetting
 from app.models.todo import Project, TodoItem
+from app.models.todo_extend import TodoAttachment, TodoComment, TodoTag, TodoItemTag
 from app.models.alerting import AlertMetric, AlertRule, NotificationChannel, AlertTemplate
 # RBAC models
 from app.models.dept import Dept
