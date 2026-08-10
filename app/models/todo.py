@@ -34,6 +34,9 @@ class TodoItem(db.Model):
     priority = db.Column(db.String(16), nullable=False, default="medium")
     assignee = db.Column(db.String(64), nullable=True)
     due_date = db.Column(db.DateTime, nullable=True)
+    view_order = db.Column(db.Integer, default=0, comment="看板排序")
+    estimated_hours = db.Column(db.Numeric(5,2), comment="预估工时")
+    actual_hours = db.Column(db.Numeric(5,2), comment="实际工时")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
