@@ -19,6 +19,8 @@ from app.views.sys_log import sys_log_bp
 from app.views.approval import approval_bp
 # 配置源管理
 from app.views.config_source import config_source_bp
+# 密码管理
+from app.views.credential import credential_bp
 
 
 def register_blueprints(app):
@@ -44,3 +46,5 @@ def register_blueprints(app):
     app.register_blueprint(approval_bp, url_prefix="/api/v1/approvals")
     # 配置源管理
     app.register_blueprint(config_source_bp)
+    # 密码管理
+    app.register_blueprint(credential_bp, url_prefix="/api/v1")
