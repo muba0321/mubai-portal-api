@@ -21,6 +21,8 @@ from app.views.approval import approval_bp
 from app.views.config_source import config_source_bp
 # 密码管理
 from app.views.credential import credential_bp
+# Git 仓库管理
+from app.views.git_repo import git_bp
 
 
 def register_blueprints(app):
@@ -48,3 +50,5 @@ def register_blueprints(app):
     app.register_blueprint(config_source_bp)
     # 密码管理
     app.register_blueprint(credential_bp, url_prefix="/api/v1")
+    # Git 仓库管理
+    app.register_blueprint(git_bp, url_prefix="/api/v1/git")
