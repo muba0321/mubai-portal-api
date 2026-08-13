@@ -418,6 +418,78 @@ def get_diff(repo_name, commit_hash):
     return success(data=files_diff)
 
 
+# ==================== 网络状态检测 ====================
+
+@git_bp.route("/network-status", methods=["GET"])
+@jwt_required()
+def get_network_status():
+    """检测 GitHub 网络连接状态"""
+    import time
+
+    results = []
+    urls_to_test = [
+        {"name": "GitHub API", "url": "https://api.github.com/repos/muba0321/mubai-portal/commits?per_page=1", "timeout": 5},
+        {"name": "GitHub.com", "url": "https://github.com", "timeout": 5},
+    ]
+
+    for item in urls_to_test:
+        start = time.time()
+        try:
+            resp = requests.get(item["url"], timeout=item["timeout"])
+            elapsed = round((time.time() - start) * 1000)
+            results.append({
+                "name": item["name"],
+                "status": "connected" if resp.status_code < 400 else "error",
+                "http_code": resp.status_code,
+                "latency_ms": elapsed,
+                "message": "连接正常" if resp.status_code < 400 else f"HTTP {resp.status_code}",
+            })
+        except requests.exceptions.Timeout:
+            results.append({
+                "name": item["name"],
+                "status": "timeout",
+                "http_code": 0,
+                "latency_ms": item["timeout"] * 1000,
+                "message": "连接超时",
+            })
+        except requests.exceptions.ConnectionError:
+            results.append({
+                "name": item["name"],
+                "status": "disconnected",
+                "http_code": 0,
+                "latency_ms": 0,
+                "message": "无法连接（网络不通或 DNS 解析失败）",
+            })
+        except Exception as e:
+            results.append({
+                "name": item["name"],
+                "status": "error",
+                "http_code": 0,
+                "latency_ms": 0,
+                "message": str(e)[:80],
+            })
+
+    # 总体状态
+    all_ok = all(r["status"] == "connected" for r in results)
+    any_timeout = any(r["status"] == "timeout" for r in results)
+
+    if all_ok:
+        overall = "connected"
+        overall_msg = "网络连接正常"
+    elif any_timeout:
+        overall = "timeout"
+        overall_msg = "部分连接超时，网络可能不稳定"
+    else:
+        overall = "disconnected"
+        overall_msg = "无法连接 GitHub，请检查网络或代理配置"
+
+    return success(data={
+        "overall": overall,
+        "overallMessage": overall_msg,
+        "checks": results,
+    })
+
+
 # ==================== Blame ====================
 
 @git_bp.route("/blame/<repo_name>", methods=["GET"])
