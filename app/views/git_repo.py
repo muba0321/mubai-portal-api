@@ -33,6 +33,11 @@ REPOS = {
 def _github_get(url: str, params: dict = None) -> dict:
     """调用 GitHub API"""
     headers = {"Accept": "application/vnd.github.v3+json"}
+    # 默认查询 main 分支的提交
+    if params is None:
+        params = {}
+    if "sha" not in params and "commits" in url:
+        params["sha"] = "main"
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code == 200:
