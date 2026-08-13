@@ -219,10 +219,18 @@ def get_branches(repo_name):
     branches = []
     for b in branches_raw:
         name = b.get("name", "")
+        commit_sha = b.get("commit", {}).get("sha", "")
+        # 获取该分支最新提交信息
+        commit_data = _github_get(
+            f"{GITHUB_API}/repos/{repo['owner']}/{repo['repo']}/commits/{commit_sha}"
+        )
+        commit_info = commit_data.get("commit", {})
+        author_info = commit_info.get("author", {})
         branches.append({
             "name": name,
-            "date": "",
-            "lastCommit": "",
+            "date": author_info.get("date", "")[:10] if author_info.get("date") else "",
+            "lastCommit": commit_info.get("message", "").split("\n")[0][:50] if commit_info.get("message") else "",
+            "author": author_info.get("name", ""),
             "isRemote": False,
             "isMain": name in ("main", "master"),
         })
@@ -249,10 +257,19 @@ def get_tags(repo_name):
 
     tags = []
     for t in tags_raw:
+        name = t.get("name", "")
+        commit_sha = t.get("commit", {}).get("sha", "")
+        # 获取该 tag 指向的提交信息
+        commit_data = _github_get(
+            f"{GITHUB_API}/repos/{repo['owner']}/{repo['repo']}/commits/{commit_sha}"
+        )
+        commit_info = commit_data.get("commit", {})
+        author_info = commit_info.get("author", {})
         tags.append({
-            "name": t.get("name", ""),
-            "date": "",
-            "message": "",
+            "name": name,
+            "date": author_info.get("date", "")[:10] if author_info.get("date") else "",
+            "message": commit_info.get("message", "").split("\n")[0][:50] if commit_info.get("message") else "",
+            "author": author_info.get("name", ""),
         })
 
     return success(data=tags)
