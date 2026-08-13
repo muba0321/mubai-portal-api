@@ -2,6 +2,7 @@
 Git 仓库管理 API - 使用 GitHub API（公开仓库无需认证）
 提供仓库概览、提交历史、分支/Tag、文件浏览、Diff 等功能
 """
+import os
 import requests
 import logging
 from flask import Blueprint, request
@@ -13,6 +14,11 @@ logger = logging.getLogger("sre-portal")
 git_bp = Blueprint("git", __name__)
 
 GITHUB_API = "https://api.github.com"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # GitHub Token 用于提高 API 限流
+
+# 缓存：{url: (timestamp, data)}
+_github_cache = {}
+CACHE_TTL = 300  # 5 分钟缓存
 
 REPOS = {
     "frontend": {
@@ -29,19 +35,45 @@ REPOS = {
     },
 }
 
+# 缓存：{url: (timestamp, data)}
+_github_cache = {}
+CACHE_TTL = 300  # 5 分钟缓存
+
 
 def _github_get(url: str, params: dict = None) -> dict:
-    """调用 GitHub API"""
-    headers = {"Accept": "application/vnd.github.v3+json"}
+    """调用 GitHub API（带缓存和 Token 认证）"""
+    # 检查缓存
+    now = __import__("time").time()
+    cache_key = f"{url}:{params}"
+    if cache_key in _github_cache:
+        ts, data = _github_cache[cache_key]
+        if now - ts < CACHE_TTL:
+            return data
+
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "MUBAI-Portal",
+    }
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
     # 默认查询 main 分支的提交
     if params is None:
         params = {}
     if "sha" not in params and "commits" in url:
         params["sha"] = "main"
+
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            _github_cache[cache_key] = (now, data)
+            return data
+        if resp.status_code == 403:
+            # 限流
+            reset_time = resp.headers.get("X-RateLimit-Reset", "")
+            logger.warning(f"GitHub API 限流，重置时间：{reset_time}")
+            return {"error": "rate_limited", "message": "GitHub API 请求限流，请稍后再试"}
         logger.error(f"GitHub API 失败: {resp.status_code} {url}")
         return {}
     except Exception as e:
