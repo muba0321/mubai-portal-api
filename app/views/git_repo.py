@@ -152,7 +152,7 @@ def get_commits(repo_name):
         logger.warning("GitHub API 失败，使用本地缓存")
         try:
             import os
-            cache_file = f'/opt/jenkins-agent/workspace/sre-portal-frontend/public/commits_cache.json'
+            cache_file = '/tmp/commits_cache.json'
             if os.path.exists(cache_file):
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cache_data = json.load(f)
