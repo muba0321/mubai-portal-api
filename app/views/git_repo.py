@@ -18,7 +18,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # GitHub Token 用于提高 API �
 
 # 缓存：{url: (timestamp, data)}
 _github_cache = {}
-CACHE_TTL = 300  # 5 分钟缓存
+CACHE_TTL = 1800  # 30 分钟缓存
 
 REPOS = {
     "frontend": {
@@ -37,7 +37,7 @@ REPOS = {
 
 # 缓存：{url: (timestamp, data)}
 _github_cache = {}
-CACHE_TTL = 300  # 5 分钟缓存
+CACHE_TTL = 1800  # 30 分钟缓存
 
 
 def _github_get(url: str, params: dict = None) -> dict:
@@ -154,7 +154,8 @@ def get_commits(repo_name):
     for c in commits_raw:
         commit = c.get("commit", {})
         message = commit.get("message", "")
-        author = commit.get("author", {}).get("name", c.get("author", {}).get("login", ""))
+        commit_author = commit.get("author") or {}
+        author = commit_author.get("name", "") or c.get("author", {}).get("login", "")
         date = commit.get("author", {}).get("date", "")
 
         # 类型筛选
@@ -323,7 +324,7 @@ def get_tree(repo_name):
 
     repo = REPOS[repo_name]
     path = request.args.get("path", "")
-    branch = request.args.get("branch", "main")
+    branch = request.args.get("branch", "master")
 
     api_path = f"contents/{path}" if path else "contents"
     data = _github_get(
@@ -374,7 +375,7 @@ def get_file_content(repo_name):
 
     repo = REPOS[repo_name]
     path = request.args.get("path", "")
-    branch = request.args.get("branch", "main")
+    branch = request.args.get("branch", "master")
 
     if not path:
         return error(msg="请指定文件路径")
