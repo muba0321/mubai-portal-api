@@ -61,7 +61,7 @@ def _github_get(url: str, params: dict = None) -> dict:
     if params is None:
         params = {}
     if "sha" not in params and "commits" in url:
-        params["sha"] = "main"
+        params["sha"] = "master"
 
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=10)
