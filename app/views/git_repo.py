@@ -140,15 +140,29 @@ def get_commits(repo_name):
     commit_type = request.args.get("type", "")
     keyword = request.args.get("keyword", "")
 
+    # 尝试从 GitHub API 获取
     params = {"page": page, "per_page": per_page}
-
     commits_raw = _github_get(
         f"{GITHUB_API}/repos/{repo['owner']}/{repo['repo']}/commits",
         params=params
     )
-
+    
+    # 如果 API 失败，使用本地缓存
     if not isinstance(commits_raw, list):
-        return error(msg="获取提交记录失败")
+        logger.warning("GitHub API 失败，使用本地缓存")
+        try:
+            import os
+            cache_file = f'/opt/jenkins-agent/workspace/sre-portal-frontend/public/commits_cache.json'
+            if os.path.exists(cache_file):
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                commits_raw = cache_data.get('list', [])
+                logger.info(f"从本地缓存加载了 {len(commits_raw)} 条记录")
+            else:
+                return error(msg="获取提交记录失败")
+        except Exception as e:
+            logger.error(f"加载本地缓存失败: {e}")
+            return error(msg="获取提交记录失败")
 
     commits = []
     for c in commits_raw:
