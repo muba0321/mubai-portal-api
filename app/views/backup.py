@@ -3,7 +3,9 @@
 """
 import json
 import time
+import hashlib
 import logging
+import random
 from datetime import datetime
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
@@ -127,8 +129,10 @@ def get_service_logs(service_id):
         result.append({
             "id": log.id,
             "status": log.status,
+            "fileName": log.file_name or (log.file_path.split("/")[-1] if log.file_path else None),
             "filePath": log.file_path,
             "fileSize": log.file_size,
+            "fileMd5": log.file_md5,
             "errorMsg": log.error_msg,
             "duration": log.duration,
             "startedAt": log.started_at.strftime("%Y-%m-%d %H:%M:%S") if log.started_at else None,
@@ -152,25 +156,48 @@ def trigger_backup(service_id):
 
     start_time = time.time()
 
+    # 生成备份文件名和 MD5
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ext = ".sql" if svc.backup_method == "mysqldump" else ".tar.gz"
+    file_name = f"{svc.name.replace(' ', '_')}_{timestamp}{ext}"
+    # 模拟 MD5
+    file_md5 = hashlib.md5(f"{file_name}{time.time()}{random.random()}".encode()).hexdigest()
+
     # 模拟备份执行
     log = ServiceBackupLog(
         service_id=service_id,
         status="success",
-        file_path=f"{svc.backup_path}/{svc.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak",
+        file_name=file_name,
+        file_path=f"{svc.backup_path}/{file_name}",
         file_size=1024 * 1024 * 50,  # 模拟 50MB
+        file_md5=file_md5,
         duration=int(time.time() - start_time),
         started_at=datetime.now(),
     )
     db.session.add(log)
     db.session.commit()
 
-    return success(data={
+    # Debug
+    logger.info(f"Backup log: id={log.id}, file_name={log.file_name}, file_md5={log.file_md5}, filePath={log.file_path}")
+
+    resp_data = {
         "logId": log.id,
         "status": log.status,
+        "fileName": log.file_name,
         "filePath": log.file_path,
         "fileSize": log.file_size,
+        "fileMd5": log.file_md5,
         "duration": log.duration,
-    }, msg="备份已触发")
+    }
+
+    print(f"DEBUG resp_data: {resp_data}", flush=True)
+    print(f"DEBUG fileName value: {log.file_name}", flush=True)
+    print(f"DEBUG fileMd5 value: {log.file_md5}", flush=True)
+
+    return success(data=resp_data, msg="备份已触发")
+
+
+@backup_bp.route("/services/<int:service_id>/restore", methods=["POST"])
 
 
 @backup_bp.route("/services/<int:service_id>/restore", methods=["POST"])
@@ -196,11 +223,17 @@ def batch_backup():
     services = ServiceBackup.query.filter_by(enabled=True).all()
     results = []
     for svc in services:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = ".sql" if svc.backup_method == "mysqldump" else ".tar.gz"
+        file_name = f"{svc.name.replace(' ', '_')}_{timestamp}{ext}"
+        file_md5 = hashlib.md5(f"{file_name}{time.time()}{random.random()}".encode()).hexdigest()
         log = ServiceBackupLog(
             service_id=svc.id,
             status="success",
-            file_path=f"{svc.backup_path}/{svc.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak",
+            file_name=file_name,
+            file_path=f"{svc.backup_path}/{file_name}",
             file_size=1024 * 1024 * 50,
+            file_md5=file_md5,
             duration=0,
             started_at=datetime.now(),
         )
@@ -296,6 +329,199 @@ def delete_log(service_id, log_id):
     db.session.delete(log)
     db.session.commit()
     return success(msg="删除成功")
+
+
+# ==================== 服务状态检测 ====================
+
+def _ssh_exec(host, command, timeout=30):
+    """SSH 执行命令"""
+    import subprocess
+    try:
+        escaped = command.replace("'", "'\"'\"'")
+        cmd = f"/usr/bin/ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes -i /root/.ssh/sre_portal_key root@{host} '{escaped}'"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+    except subprocess.TimeoutExpired:
+        return "", "超时", -1
+    except Exception as e:
+        return "", str(e), -1
+
+
+def _check_service_status(svc):
+    """检测单个服务的实时状态"""
+    result = {
+        "serviceId": svc.id,
+        "serviceName": svc.name,
+        "serverIp": svc.server_ip,
+        "status": "unknown",
+        "uptime": None,
+        "pid": None,
+        "portStatus": "unknown",
+        "cpu": None,
+        "memory": None,
+        "error": None,
+    }
+
+    if svc.process_type == "docker":
+        # Docker 容器状态检测
+        stdout, stderr, rc = _ssh_exec(svc.server_ip, f"docker ps -a --filter name=^{svc.process_name}$ --format '{{{{.Status}}}}|{{{{.ID}}}}'", timeout=15)
+        if rc == 0 and stdout:
+            parts = stdout.split("|")
+            status_str = parts[0] if parts else ""
+            container_id = parts[1] if len(parts) > 1 else ""
+            if "Up" in status_str:
+                result["status"] = "running"
+                # 获取运行时长
+                uptime_stdout, _, _ = _ssh_exec(svc.server_ip, f"docker inspect -f '{{{{.State.StartedAt}}}}' {container_id}", timeout=10)
+                if uptime_stdout:
+                    try:
+                        started = datetime.fromisoformat(uptime_stdout.replace("Z", "+00:00"))
+                        result["uptime"] = int((datetime.now(started.tzinfo) - started).total_seconds())
+                    except:
+                        pass
+                # 获取资源使用
+                stats_stdout, _, _ = _ssh_exec(svc.server_ip, f"docker stats --no-stream --format '{{{{.CPUPerc}}}}|{{{{.MemUsage}}}}' {container_id}", timeout=10)
+                if stats_stdout:
+                    stats_parts = stats_stdout.split("|")
+                    if len(stats_parts) >= 2:
+                        result["cpu"] = stats_parts[0].strip().replace("%", "")
+                        mem_str = stats_parts[1].strip()
+                        # Parse "123MiB / 1.94GiB" -> extract used
+                        if "/" in mem_str:
+                            used = mem_str.split("/")[0].strip()
+                            result["memory"] = used
+            elif "Exited" in status_str or "Created" in status_str:
+                result["status"] = "stopped"
+            else:
+                result["status"] = "unknown"
+        else:
+            result["status"] = "error"
+            result["error"] = stderr or "容器不存在"
+
+    elif svc.process_type == "systemd":
+        # systemd 服务状态检测
+        stdout, stderr, rc = _ssh_exec(svc.server_ip, f"systemctl is-active {svc.process_name}", timeout=10)
+        if stdout == "active":
+            result["status"] = "running"
+            # 获取 PID
+            pid_stdout, _, _ = _ssh_exec(svc.server_ip, f"systemctl show {svc.process_name} --property=MainPID --value", timeout=10)
+            if pid_stdout and pid_stdout != "0":
+                result["pid"] = int(pid_stdout)
+            # 获取运行时长
+            uptime_stdout, _, _ = _ssh_exec(svc.server_ip, f"systemctl show {svc.process_name} --property=ActiveEnterTimestamp --value", timeout=10)
+            if uptime_stdout:
+                try:
+                    started = datetime.strptime(uptime_stdout, "%a %Y-%m-%d %H:%M:%S %Z")
+                    result["uptime"] = int((datetime.now() - started).total_seconds())
+                except:
+                    pass
+        elif stdout in ("inactive", "failed"):
+            result["status"] = "stopped"
+        else:
+            result["status"] = "error"
+            result["error"] = stderr
+
+    elif svc.process_type == "native":
+        # 原生进程检测（通过端口）
+        port_stdout, _, _ = _ssh_exec(svc.server_ip, f"ss -tlnp | grep :{svc.port}", timeout=10)
+        if port_stdout:
+            result["status"] = "running"
+            # 提取 PID
+            import re
+            pid_match = re.search(r'pid=(\d+)', port_stdout)
+            if pid_match:
+                result["pid"] = int(pid_match.group(1))
+        else:
+            result["status"] = "stopped"
+
+    else:
+        result["status"] = "skip"  # 无需检测的服务
+
+    # 端口检测
+    if svc.port:
+        port_check, _, _ = _ssh_exec(svc.server_ip, f"ss -tlnp | grep :{svc.port}", timeout=10)
+        result["portStatus"] = "open" if port_check else "closed"
+
+    return result
+
+
+@backup_bp.route("/status/check", methods=["POST"])
+@jwt_required()
+def check_all_status():
+    """实时检测所有服务状态"""
+    services = ServiceBackup.query.order_by(ServiceBackup.sort.asc()).all()
+    results = []
+    for svc in services:
+        try:
+            status = _check_service_status(svc)
+            results.append(status)
+        except Exception as e:
+            results.append({
+                "serviceId": svc.id,
+                "serviceName": svc.name,
+                "serverIp": svc.server_ip,
+                "status": "error",
+                "error": str(e),
+            })
+
+    return success(data=results)
+
+
+# ==================== 服务控制 ====================
+
+def _control_service(svc, action):
+    """控制服务启停"""
+    if svc.process_type == "docker":
+        cmd_map = {"start": "start", "stop": "stop", "restart": "restart"}
+        cmd = cmd_map.get(action)
+        if not cmd:
+            return False, f"不支持的操作: {action}"
+        stdout, stderr, rc = _ssh_exec(svc.server_ip, f"docker {cmd} {svc.process_name}", timeout=30)
+        return rc == 0, stderr or stdout
+    elif svc.process_type == "systemd":
+        stdout, stderr, rc = _ssh_exec(svc.server_ip, f"systemctl {action} {svc.process_name}", timeout=30)
+        return rc == 0, stderr or stdout
+    else:
+        return False, f"不支持的服务类型: {svc.process_type}"
+
+
+@backup_bp.route("/services/<int:service_id>/start", methods=["POST"])
+@jwt_required()
+def start_service(service_id):
+    """启动服务"""
+    svc = ServiceBackup.query.get(service_id)
+    if not svc:
+        return error(msg="服务不存在")
+    ok, msg = _control_service(svc, "start")
+    if ok:
+        return success(msg=f"已启动 {svc.name}")
+    return error(msg=f"启动失败: {msg}")
+
+
+@backup_bp.route("/services/<int:service_id>/stop", methods=["POST"])
+@jwt_required()
+def stop_service(service_id):
+    """停止服务"""
+    svc = ServiceBackup.query.get(service_id)
+    if not svc:
+        return error(msg="服务不存在")
+    ok, msg = _control_service(svc, "stop")
+    if ok:
+        return success(msg=f"已停止 {svc.name}")
+    return error(msg=f"停止失败: {msg}")
+
+
+@backup_bp.route("/services/<int:service_id>/restart", methods=["POST"])
+@jwt_required()
+def restart_service(service_id):
+    """重启服务"""
+    svc = ServiceBackup.query.get(service_id)
+    if not svc:
+        return error(msg="服务不存在")
+    ok, msg = _control_service(svc, "restart")
+    if ok:
+        return success(msg=f"已重启 {svc.name}")
+    return error(msg=f"重启失败: {msg}")
 
 
 # ==================== 种子数据 ====================
