@@ -61,7 +61,7 @@ class JenkinsClient:
 
     def get_builds(self, job_name, limit=20):
         """获取构建历史"""
-        return self._request('GET', f'/job/{quote(job_name, safe="")}/api/json?tree=builds[number,status,duration,timestamp,url]{{0,{limit}}}')
+        return self._request('GET', f'/job/{quote(job_name, safe="")}/api/json?tree=builds[number,result,duration,timestamp,url]{{0,{limit}}}')
 
     def get_build_detail(self, job_name, build_number):
         """获取构建详情"""

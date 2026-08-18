@@ -129,7 +129,7 @@ def get_pipeline_builds(job_name):
     for build in paginated_builds:
         result.append({
             "number": build.get("number"),
-            "status": build.get("status"),
+            "status": build.get("result") or build.get("status"),
             "duration": build.get("duration"),
             "timestamp": build.get("timestamp"),
             "url": build.get("url")
