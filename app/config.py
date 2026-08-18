@@ -53,6 +53,11 @@ class Config:
     REDIS_DB = int(_get_config('redis.database', 0))
     REDIS_TIMEOUT = int(_get_config('redis.timeout', 5000))
 
+    # Jenkins 配置
+    JENKINS_URL = _get_config('jenkins.url', 'http://154.12.54.207:8082')
+    JENKINS_USERNAME = _get_config('jenkins.username', 'mubai')
+    JENKINS_TOKEN = _get_config('jenkins.token', '')
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
@@ -72,8 +77,3 @@ config_map = {
     "production": ProductionConfig,
     "testing": TestingConfig,
 }
-
-# Jenkins 配置
-JENKINS_URL = "http://154.12.54.207:8082"
-JENKINS_USERNAME = "mubai"
-JENKINS_TOKEN = "1161194cf3a482852ad41c9a30d275c5cf"
