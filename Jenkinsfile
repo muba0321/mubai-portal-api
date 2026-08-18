@@ -6,7 +6,7 @@ pipeline {
 
     environment {
         GIT_REPO = 'https://github.com/muba0321/mubai-portal-api.git'
-        GIT_BRANCH = 'main'
+        GIT_BRANCH = 'master'
         DEPLOY_HOST = '154.201.73.215'
         DEPLOY_USER = 'root'
         APP_DIR = '/opt/jenkins-agent'
