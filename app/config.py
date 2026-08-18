@@ -56,7 +56,7 @@ class Config:
     # Jenkins 配置
     JENKINS_URL = _get_config('jenkins.url', 'http://154.12.54.207:8082')
     JENKINS_USERNAME = _get_config('jenkins.username', 'mubai')
-    JENKINS_TOKEN = _get_config('jenkins.token', '')
+    JENKINS_TOKEN = _get_config('jenkins.token', '1161194cf3a482852ad41c9a30d275c5cf')
 
 
 class DevelopmentConfig(Config):
