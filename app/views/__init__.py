@@ -52,3 +52,7 @@ def register_blueprints(app):
     app.register_blueprint(credential_bp, url_prefix="/api/v1")
     # Git 仓库管理
     app.register_blueprint(git_bp, url_prefix="/api/v1/git")
+
+    # Jenkins 管理
+    from app.views.jenkins import jenkins_bp
+    app.register_blueprint(jenkins_bp, url_prefix="/api/v1/jenkins")

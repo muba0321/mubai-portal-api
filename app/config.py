@@ -72,3 +72,8 @@ config_map = {
     "production": ProductionConfig,
     "testing": TestingConfig,
 }
+
+# Jenkins 配置
+JENKINS_URL = "http://154.12.54.207:8082"
+JENKINS_USERNAME = "admin"
+JENKINS_TOKEN = "11c2b2b1adf7940191dfd1d258e4284912"
