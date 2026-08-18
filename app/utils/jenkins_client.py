@@ -85,12 +85,11 @@ class JenkinsClient:
         if "error" in build_data:
             return build_data
 
-        # 尝试使用 WfAPI (Pipeline REST API) 获取 stages
+        # 使用 WfAPI (Pipeline REST API) 获取 stages
         stages_data = self._request('GET', f'/job/{quote(job_name, safe="")}/{build_number}/wfapi/describe')
 
         stages = []
         if "error" not in stages_data:
-            # WfAPI 可用，解析 stages
             stages = stages_data.get("stages", [])
 
         result = {
@@ -101,11 +100,9 @@ class JenkinsClient:
             "building": build_data.get("building", False),
             "description": build_data.get("description", ""),
             "url": build_data.get("url", ""),
-            "stages": [],
-            "wfapiAvailable": len(stages) > 0
+            "stages": []
         }
 
-        # 解析 stages（如果有 WfAPI 数据）
         for stage in stages:
             result["stages"].append({
                 "name": stage.get("name", ""),
