@@ -75,5 +75,5 @@ config_map = {
 
 # Jenkins 配置
 JENKINS_URL = "http://154.12.54.207:8082"
-JENKINS_USERNAME = "admin"
+JENKINS_USERNAME = "mubai"
 JENKINS_TOKEN = "1161194cf3a482852ad41c9a30d275c5cf"
