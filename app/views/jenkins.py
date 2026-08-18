@@ -2,6 +2,7 @@
 Jenkins 管理 API
 提供流水线管理、节点管理、队列管理等功能
 """
+import re
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
 from app.utils.response import success, error
@@ -39,16 +40,70 @@ def get_pipelines():
     return success(data=result)
 
 
+@jenkins_bp.route("/pipelines/<job_name>/config", methods=["GET"])
+@jwt_required()
+def get_pipeline_config(job_name):
+    """获取流水线配置（参数定义）"""
+    data = jenkins_client.get_job_config(job_name)
+    if "error" in data:
+        return error(msg=data["error"])
+
+    # 解析 XML 获取参数定义
+    xml_content = data.get("xml", "")
+    parameters = []
+
+    # 解析 StringParameterDefinition
+    string_params = re.findall(r'<hudson.model.StringParameterDefinition>.*?</hudson.model.StringParameterDefinition>', xml_content, re.DOTALL)
+    for param_xml in string_params:
+        name_match = re.search(r'<name>(.*?)</name>', param_xml)
+        desc_match = re.search(r'<description>(.*?)</description>', param_xml)
+        default_match = re.search(r'<defaultValue>(.*?)</defaultValue>', param_xml)
+        parameters.append({
+            "name": name_match.group(1) if name_match else "",
+            "type": "string",
+            "description": desc_match.group(1) if desc_match else "",
+            "defaultValue": default_match.group(1) if default_match else ""
+        })
+
+    # 解析 BooleanParameterDefinition
+    bool_params = re.findall(r'<hudson.model.BooleanParameterDefinition>.*?</hudson.model.BooleanParameterDefinition>', xml_content, re.DOTALL)
+    for param_xml in bool_params:
+        name_match = re.search(r'<name>(.*?)</name>', param_xml)
+        desc_match = re.search(r'<description>(.*?)</description>', param_xml)
+        default_match = re.search(r'<defaultValue>(.*?)</defaultValue>', param_xml)
+        parameters.append({
+            "name": name_match.group(1) if name_match else "",
+            "type": "boolean",
+            "description": desc_match.group(1) if desc_match else "",
+            "defaultValue": default_match.group(1).lower() == "true" if default_match else False
+        })
+
+    # 解析 ChoiceParameterDefinition
+    choice_params = re.findall(r'<hudson.model.ChoiceParameterDefinition>.*?</hudson.model.ChoiceParameterDefinition>', xml_content, re.DOTALL)
+    for param_xml in choice_params:
+        name_match = re.search(r'<name>(.*?)</name>', param_xml)
+        desc_match = re.search(r'<description>(.*?)</description>', param_xml)
+        choices = re.findall(r'<string>(.*?)</string>', param_xml)
+        parameters.append({
+            "name": name_match.group(1) if name_match else "",
+            "type": "choice",
+            "description": desc_match.group(1) if desc_match else "",
+            "choices": choices
+        })
+
+    return success(data={"parameters": parameters, "hasParameters": len(parameters) > 0})
+
+
 @jenkins_bp.route("/pipelines/<job_name>/build", methods=["POST"])
 @jwt_required()
 def trigger_pipeline_build(job_name):
     """触发流水线构建"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     parameters = data.get("parameters")
 
     result = jenkins_client.trigger_build(job_name, parameters)
     if "error" in result:
-        return error(msg=result["error"])
+        return error(msg=result.get("message", result["error"]))
 
     return success(data={"message": "构建已触发", "queueId": result.get("id")})
 
@@ -99,6 +154,17 @@ def get_build_detail(job_name, build_number):
     return success(data=data)
 
 
+@jenkins_bp.route("/pipelines/<job_name>/builds/<int:build_number>/overview", methods=["GET"])
+@jwt_required()
+def get_build_overview(job_name, build_number):
+    """获取构建概览（stages 信息）"""
+    data = jenkins_client.get_build_overview(job_name, build_number)
+    if "error" in data:
+        return error(msg=data.get("message", data["error"]))
+
+    return success(data=data)
+
+
 @jenkins_bp.route("/pipelines/<job_name>/builds/<int:build_number>/log", methods=["GET"])
 @jwt_required()
 def get_build_log(job_name, build_number):
@@ -123,24 +189,30 @@ def get_nodes():
     computers = data.get("computer", [])
     result = []
     for computer in computers:
+        display_name = computer.get("displayName", "")
+        # 为内置节点使用友好的名称
+        name = display_name
+        if "(built-in)" in display_name.lower() or "master" in display_name.lower():
+            name = "Built-In Node"
+
         result.append({
-            "name": computer.get("displayName"),
-            "displayName": computer.get("displayName"),
+            "name": name,
+            "displayName": display_name,
             "offline": computer.get("offline"),
             "numExecutors": computer.get("numExecutors"),
-            "numExecutorsBusy": computer.get("numExecutorsBusy")
+            "numExecutorsBusy": computer.get("busyExecutors", 0)
         })
 
     return success(data=result)
 
 
-@jenkins_bp.route("/nodes/<node_name>", methods=["GET"])
+@jenkins_bp.route("/nodes/<path:node_name>", methods=["GET"])
 @jwt_required()
 def get_node_detail(node_name):
     """获取节点详情"""
     data = jenkins_client.get_node_info(node_name)
     if "error" in data:
-        return error(msg=data["error"])
+        return error(msg=data.get("message", data["error"]))
 
     return success(data=data)
 
