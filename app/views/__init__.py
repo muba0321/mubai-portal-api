@@ -23,6 +23,8 @@ from app.views.config_source import config_source_bp
 from app.views.credential import credential_bp
 # Git 仓库管理
 from app.views.git_repo import git_bp
+# 服务备份管理
+from app.views.backup import backup_bp
 
 
 def register_blueprints(app):
@@ -56,3 +58,7 @@ def register_blueprints(app):
     # Jenkins 管理
     from app.views.jenkins import jenkins_bp
     app.register_blueprint(jenkins_bp, url_prefix="/api/v1/jenkins")
+
+    # 服务备份管理
+    from app.views.backup import backup_bp
+    app.register_blueprint(backup_bp, url_prefix="/api/v1/backup")

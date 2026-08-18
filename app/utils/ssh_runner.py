@@ -3,6 +3,7 @@ SSH 远程命令执行引擎
 使用 subprocess + SSH 密钥认证，无需额外依赖
 """
 import subprocess
+import time
 import json
 import logging
 import re
@@ -27,6 +28,7 @@ class SSHRunner:
     def exec_on_host(self, host, command, user="root", timeout=None):
         """在单台主机上执行命令"""
         timeout = timeout or self.timeout
+        start = time.time()
         try:
             cmd = (
                 f"/usr/bin/ssh -o StrictHostKeyChecking=no "
@@ -51,28 +53,34 @@ class SSHRunner:
             else:
                 status = "failed"
 
+            elapsed = int(time.time() - start)
             return {
                 "host": host,
                 "output": output,
                 "error": error.strip() if error else "",
                 "exit_code": exit_code,
                 "status": status,
+                "duration": elapsed,
             }
         except subprocess.TimeoutExpired:
+            elapsed = int(time.time() - start)
             return {
                 "host": host,
                 "output": "",
                 "error": f"命令执行超时 ({timeout}s)",
                 "exit_code": -1,
                 "status": "timeout",
+                "duration": elapsed,
             }
         except Exception as e:
+            elapsed = int(time.time() - start)
             return {
                 "host": host,
                 "output": "",
                 "error": str(e),
                 "exit_code": -1,
                 "status": "error",
+                "duration": elapsed,
             }
 
     def exec_batch(self, hosts, command, max_workers=5, timeout=None):

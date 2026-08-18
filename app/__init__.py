@@ -47,6 +47,14 @@ def create_app(env="development"):
         except Exception:
             pass  # 表未创建时跳过，由 seed_rbac.py 初始化
 
+    # 初始化服务备份种子数据
+    with app.app_context():
+        try:
+            from app.views.backup import init_seed_data
+            init_seed_data()
+        except Exception:
+            pass  # 表未创建时跳过
+
     # 请求日志
     logger = logging.getLogger("sre-portal")
     logger.setLevel(logging.INFO)

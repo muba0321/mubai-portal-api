@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
-from app.utils.response import success, error
+from app.utils.response import success, error, job_result
 from app.utils.ssh_runner import SSHRunner
 from app.config import Config
 
@@ -267,7 +267,20 @@ def create_job():
 
     db.session.commit()
 
-    return success(data={
+    # 结构化主机状态汇总
+    host_summary = {
+        "success": [{"host": h, "duration": r.get("duration", 0)}
+                    for h, r in results.items() if r["status"] == "success"],
+        "failed": [{"host": h, "error": r.get("error", ""),
+                    "exit_code": r.get("exit_code", -1), "duration": r.get("duration", 0)}
+                   for h, r in results.items() if r["status"] in ("failed", "error")],
+        "timeout": [{"host": h, "error": r.get("error", ""), "duration": r.get("duration", 0)}
+                    for h, r in results.items() if r["status"] == "timeout"],
+        "unreachable": [{"host": h, "error": r.get("error", "")}
+                        for h, r in results.items() if r["status"] == "unreachable"],
+    }
+
+    return job_result(data={
         "job_id": job.id,
         "status": job.status,
         "duration": duration,
@@ -275,7 +288,8 @@ def create_job():
         "success_count": success_count,
         "fail_count": fail_count,
         "results": results,
-    })
+        "host_summary": host_summary,
+    }, job_status=job.status)
 
 
 @ansible_bp.route("/jobs", methods=["GET"])
@@ -298,6 +312,8 @@ def list_jobs():
     result = []
     for job in jobs:
         targets = json.loads(job.targets) if job.targets else []
+        job_results = json.loads(job.result) if job.result else {}
+        fail_host_count = sum(1 for r in job_results.values() if r.get("status") != "success")
         result.append({
             "id": job.id,
             "jobName": job.job_name,
@@ -308,6 +324,7 @@ def list_jobs():
             "createdBy": job.created_by,
             "startedAt": job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else None,
             "duration": job.duration,
+            "failHostCount": fail_host_count,
             "createdAt": job.created_at.strftime("%Y-%m-%d %H:%M:%S") if job.created_at else None,
         })
 
@@ -345,6 +362,80 @@ def get_job(job_id):
         "errorMsg": job.error_msg,
         "createdAt": job.created_at.strftime("%Y-%m-%d %H:%M:%S") if job.created_at else None,
     })
+
+
+@ansible_bp.route("/jobs/<int:job_id>/retry", methods=["POST"])
+@jwt_required()
+def retry_job(job_id):
+    """重新执行失败的主机"""
+    from app.models.ansible_job import AnsibleJob
+
+    job = AnsibleJob.query.get(job_id)
+    if not job:
+        return error(msg="作业不存在")
+
+    results = json.loads(job.result) if job.result else {}
+    failed_hosts = [h for h, r in results.items() if r.get("status") != "success"]
+
+    if not failed_hosts:
+        return error(msg="没有需要重试的失败主机")
+
+    command = job.module_args
+    username = _get_current_user()
+
+    # 创建新作业记录
+    new_job = AnsibleJob(
+        job_name=f"{job.job_name} (重试)",
+        job_type="retry",
+        module=job.module,
+        module_args=command,
+        targets=json.dumps(failed_hosts, ensure_ascii=False),
+        extra_vars=job.extra_vars,
+        status="running",
+        created_by=username,
+        started_at=datetime.now(),
+    )
+    db.session.add(new_job)
+    db.session.commit()
+
+    # 执行命令
+    runner = _get_runner()
+    start_time = time.time()
+    results = runner.exec_batch(failed_hosts, command)
+    duration = int(time.time() - start_time)
+
+    success_count = sum(1 for r in results.values() if r["status"] == "success")
+    fail_count = sum(1 for r in results.values() if r["status"] != "success")
+
+    new_job.status = "success" if fail_count == 0 else "partial" if success_count > 0 else "failed"
+    new_job.finished_at = datetime.now()
+    new_job.duration = duration
+    new_job.result = json.dumps(results, ensure_ascii=False)
+    db.session.commit()
+
+    # 结构化主机状态汇总
+    host_summary = {
+        "success": [{"host": h, "duration": r.get("duration", 0)}
+                    for h, r in results.items() if r["status"] == "success"],
+        "failed": [{"host": h, "error": r.get("error", ""),
+                    "exit_code": r.get("exit_code", -1), "duration": r.get("duration", 0)}
+                   for h, r in results.items() if r["status"] in ("failed", "error")],
+        "timeout": [{"host": h, "error": r.get("error", ""), "duration": r.get("duration", 0)}
+                    for h, r in results.items() if r["status"] == "timeout"],
+        "unreachable": [{"host": h, "error": r.get("error", "")}
+                        for h, r in results.items() if r["status"] == "unreachable"],
+    }
+
+    return job_result(data={
+        "job_id": new_job.id,
+        "status": new_job.status,
+        "duration": duration,
+        "total_hosts": len(failed_hosts),
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "results": results,
+        "host_summary": host_summary,
+    }, job_status=new_job.status)
 
 
 # ==================== 定时任务 ====================
@@ -472,14 +563,23 @@ def get_schedule_logs(schedule_id):
 
     result = []
     for log in logs:
-        result.append({
+        entry = {
             "id": log.id,
             "status": log.status,
             "output": log.output,
             "errorMsg": log.error_msg,
             "duration": log.duration,
             "startedAt": log.started_at.strftime("%Y-%m-%d %H:%M:%S") if log.started_at else None,
-        })
+        }
+        # 解析结构化报告
+        if log.output:
+            try:
+                parsed = json.loads(log.output)
+                if isinstance(parsed, dict) and "task_type" in parsed:
+                    entry["report"] = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        result.append(entry)
 
     return success(data={"total": total, "list": result})
 

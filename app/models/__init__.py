@@ -16,3 +16,4 @@ from app.models.sys_oper_log import OperLog
 from app.models.approval import ApprovalTemplate, ApprovalRecord, ApprovalStep
 from app.models.grafana_ai_history import GrafanaAiHistory
 from app.models.ansible_job import AnsibleJob, AnsibleSchedule, AnsibleCommand, AnsibleScheduleLog
+from app.models.service_backup import ServiceBackup, ServiceBackupLog
