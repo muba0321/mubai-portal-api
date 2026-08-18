@@ -80,21 +80,32 @@ class JenkinsClient:
 
     def get_build_overview(self, job_name, build_number):
         """获取构建概览（stages 信息）"""
-        # 使用 WfAPI (Pipeline REST API) 获取 stages
-        stages_data = self._request('GET', f'/job/{quote(job_name, safe="")}/{build_number}/wfapi/describe')
-        if "error" in stages_data:
-            return stages_data
+        # 先获取构建详情
+        build_data = self.get_build_detail(job_name, build_number)
+        if "error" in build_data:
+            return build_data
 
-        # 解析 stages
-        stages = stages_data.get("stages", [])
+        # 尝试使用 WfAPI (Pipeline REST API) 获取 stages
+        stages_data = self._request('GET', f'/job/{quote(job_name, safe="")}/{build_number}/wfapi/describe')
+
+        stages = []
+        if "error" not in stages_data:
+            # WfAPI 可用，解析 stages
+            stages = stages_data.get("stages", [])
+
         result = {
-            "name": stages_data.get("name", ""),
-            "status": stages_data.get("status", ""),
-            "startTimeMillis": stages_data.get("startTimeMillis", 0),
-            "durationMillis": stages_data.get("durationMillis", 0),
-            "stages": []
+            "name": build_data.get("fullDisplayName", ""),
+            "status": build_data.get("result", "RUNNING"),
+            "startTimeMillis": build_data.get("timestamp", 0),
+            "durationMillis": build_data.get("duration", 0),
+            "building": build_data.get("building", False),
+            "description": build_data.get("description", ""),
+            "url": build_data.get("url", ""),
+            "stages": [],
+            "wfapiAvailable": len(stages) > 0
         }
 
+        # 解析 stages（如果有 WfAPI 数据）
         for stage in stages:
             result["stages"].append({
                 "name": stage.get("name", ""),
