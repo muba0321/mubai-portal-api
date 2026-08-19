@@ -5,8 +5,7 @@ from app.views.database import database_bp
 from app.views.monitoring import monitoring_bp
 from app.views.setting import config_bp
 from app.views.system import system_bp
-from app.views.todo import todo_bp
-from app.views.todo_extend import todo_extend_bp
+from app.views.requirement import requirement_bp
 from app.views.grafana import grafana_bp
 from app.views.alerting import alerting_bp
 from app.views.ansible import ansible_bp
@@ -36,8 +35,7 @@ def register_blueprints(app):
     app.register_blueprint(grafana_bp, url_prefix="/api/v1/grafana")
     app.register_blueprint(config_bp, url_prefix="/api/v1/configs")
     app.register_blueprint(system_bp, url_prefix="/api/v1")
-    app.register_blueprint(todo_bp, url_prefix="/api/v1/todo")
-    app.register_blueprint(todo_extend_bp, url_prefix="/api/v1/todo")
+    app.register_blueprint(requirement_bp, url_prefix="/api/v1/requirements")
     app.register_blueprint(alerting_bp, url_prefix="/api/v1/alerting")
     app.register_blueprint(ansible_bp, url_prefix="/api/v1/ansible")
     # RBAC
