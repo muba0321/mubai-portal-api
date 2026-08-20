@@ -240,14 +240,38 @@ def create_requirement():
     return success(data={"id": req.id}, msg="创建成功")
 
 
-@requirement_bp.route("/<int:req_id>", methods=["PUT"])
+@requirement_bp.route("/<int:req_id>", methods=["GET", "PUT"])
 @jwt_required()
-def update_requirement(req_id):
-    """更新需求"""
+def get_or_update_requirement(req_id):
+    """获取或更新需求"""
     req = Requirement.query.get(req_id)
     if not req:
         return error(msg="需求不存在")
 
+    if request.method == "GET":
+        return success(data={
+            "id": req.id,
+            "projectId": req.project_id,
+            "parentId": req.parent_id,
+            "title": req.title,
+            "description": req.description,
+            "requirementType": req.requirement_type,
+            "priority": req.priority,
+            "status": req.status,
+            "reporterId": req.reporter_id,
+            "assignee": req.assignee,
+            "assigneeId": req.assignee_id,
+            "milestoneId": req.milestone_id,
+            "dueDate": req.due_date.strftime("%Y-%m-%d %H:%M:%S") if req.due_date else None,
+            "estimatedEffort": req.estimated_effort,
+            "tags": req.tags or [],
+            "viewOrder": req.view_order,
+            "version": req.version,
+            "createdAt": req.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "updatedAt": req.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+    # PUT: update requirement
     data = request.get_json()
     user_id = _get_current_user_id()
     changes = []
