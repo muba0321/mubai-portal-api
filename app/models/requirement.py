@@ -97,3 +97,29 @@ class Milestone(db.Model):
 
     def __repr__(self):
         return f"<Milestone {self.title}>"
+
+
+class RequirementCommit(db.Model):
+    """需求与 Git 提交的多对多关联表"""
+    __tablename__ = "requirement_commits"
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    requirement_id = db.Column(db.Integer, db.ForeignKey("requirement.id", ondelete="CASCADE"), nullable=False)
+    repo_module = db.Column(db.String(10), nullable=False, comment="仓库模块: 后端/前端")
+    commit_hash = db.Column(db.String(40), nullable=False, comment="提交 hash")
+    commit_subject = db.Column(db.String(256), comment="提交主题")
+    commit_date = db.Column(db.Date, comment="提交日期")
+    commit_author = db.Column(db.String(64), comment="提交作者")
+    files_changed = db.Column(db.JSON, comment="文件变更列表")
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    __table_args__ = (
+        db.UniqueConstraint("requirement_id", "repo_module", "commit_hash", name="uk_req_commit"),
+        db.Index("idx_requirement", "requirement_id"),
+        db.Index("idx_commit", "commit_hash"),
+    )
+
+    requirement = db.relationship("Requirement", backref=db.backref("commits", lazy="dynamic"))
+
+    def __repr__(self):
+        return f"<RequirementCommit req={self.requirement_id} hash={self.commit_hash[:7]}>"

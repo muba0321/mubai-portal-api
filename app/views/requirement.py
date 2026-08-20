@@ -9,7 +9,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.utils.response import success, error
-from app.models.requirement import Project, Requirement, Milestone
+from app.models.requirement import Project, Requirement, Milestone, RequirementCommit
 from app.models.requirement_extend import (
     RequirementAttachment, RequirementComment, RequirementLabel, RequirementLabelMap,
     RequirementVersion, RequirementActivity,
@@ -452,110 +452,126 @@ def get_calendar():
     return success(data={"events": events, "year": year, "month": month})
 
 
-# ==================== Git 提交记录日历 ====================
+# ==================== 需求日历 ====================
 
-@requirement_bp.route("/calendar/commits", methods=["GET"])
+@requirement_bp.route("/calendar/requirements", methods=["GET"])
 @jwt_required()
-def get_commit_calendar():
-    """Git 提交记录日历（按日期分组）"""
+def get_requirement_calendar():
+    """需求日历（按日期分组返回需求，每个需求包含关联的提交）"""
     year = request.args.get("year", type=int)
     month = request.args.get("month", type=int)
+    project_id = request.args.get("projectId", type=int)
 
     if not year or not month:
         now = datetime.now()
         year = now.year
         month = now.month
 
-    import subprocess, os
-    from datetime import date
-
-    start_date = date(year, month, 1)
+    from datetime import date as date_type
+    start_date = date_type(year, month, 1)
     if month == 12:
-        end_date = date(year + 1, 1, 1)
+        end_date = date_type(year + 1, 1, 1)
     else:
-        end_date = date(year, month + 1, 1)
+        end_date = date_type(year, month + 1, 1)
 
-    since = start_date.strftime("%Y-%m-%d")
-    until = end_date.strftime("%Y-%m-%d")
+    # 查询该月有提交关联的需求
+    commits_in_month = RequirementCommit.query.filter(
+        RequirementCommit.commit_date >= start_date,
+        RequirementCommit.commit_date < end_date,
+    ).all()
 
-    repos = {
-        "后端": "/opt/repos/backend",
-        "前端": "/opt/repos/frontend",
-    }
+    # 按需求分组
+    req_map = {}
+    for rc in commits_in_month:
+        if rc.requirement_id not in req_map:
+            req_map[rc.requirement_id] = {"requirement": None, "commits": []}
+        req_map[rc.requirement_id]["commits"].append(rc)
 
+    # 批量加载需求
+    req_ids = list(req_map.keys())
+    requirements = Requirement.query.filter(Requirement.id.in_(req_ids), Requirement.deleted_at.is_(None)).all()
+    req_dict = {r.id: r for r in requirements}
+
+    # 按日期分组
     events = {}
-    all_commits = []
+    for req_id, data in req_map.items():
+        req = req_dict.get(req_id)
+        if not req:
+            continue
 
-    for module, repo_path in repos.items():
-        try:
-            if not os.path.exists(os.path.join(repo_path, ".git")):
-                continue
-            # 获取提交列表
-            result = subprocess.run(
-                ["git", "log", "--format=%H|%s|%an|%ai", f"--since={since}", f"--until={until}"],
-                capture_output=True, text=True, cwd=repo_path, timeout=10
-            )
-            output = result.stdout.strip()
-            if not output:
-                continue
+        # 该需求在该月的提交日期
+        commit_dates = set()
+        for rc in data["commits"]:
+            if rc.commit_date:
+                commit_dates.add(rc.commit_date)
 
-            for line in output.split("\n"):
-                if not line or "|" not in line:
-                    continue
-                meta = line.split("|")
-                if len(meta) < 4:
-                    continue
+        # 需求在日历上的展示日期 = 最早提交日期
+        display_date = min(commit_dates) if commit_dates else start_date
+        date_key = display_date.strftime("%Y-%m-%d")
 
-                commit_hash = meta[0][:7]
-                subject = meta[1]
-                author = meta[2]
-                date_str = meta[3]
-                try:
-                    commit_date = date_str.split(" ")[0]
-                except:
-                    continue
+        if date_key not in events:
+            events[date_key] = []
 
-                # 获取该提交的文件变更
-                files_changed = []
-                try:
-                    numstat = subprocess.run(
-                        ["git", "show", "--format=", "--numstat", meta[0]],
-                        capture_output=True, text=True, cwd=repo_path, timeout=5
-                    )
-                    for fline in numstat.stdout.strip().split("\n"):
-                        parts = fline.strip().split("\t")
-                        if len(parts) == 3 and parts[2].endswith((".py", ".ts", ".vue", ".js", ".sql")):
-                            files_changed.append({
-                                "path": parts[2],
-                                "additions": int(parts[0]) if parts[0] != "-" else 0,
-                                "deletions": int(parts[1]) if parts[1] != "-" else 0,
-                            })
-                except:
-                    pass
+        # 按模块分组提交
+        commits_by_module = {}
+        for rc in data["commits"]:
+            mod = rc.repo_module
+            if mod not in commits_by_module:
+                commits_by_module[mod] = []
+            commits_by_module[mod].append({
+                "hash": rc.commit_hash[:7],
+                "fullHash": rc.commit_hash,
+                "subject": rc.commit_subject,
+                "author": rc.commit_author,
+                "date": rc.commit_date.strftime("%Y-%m-%d") if rc.commit_date else None,
+                "files": rc.files_changed or [],
+            })
 
-                commit_data = {
-                    "hash": commit_hash,
-                    "fullHash": meta[0],
-                    "subject": subject,
-                    "author": author,
-                    "date": commit_date,
-                    "module": module,
-                    "files": files_changed,
-                }
-
-                if commit_date not in events:
-                    events[commit_date] = []
-                events[commit_date].append(commit_data)
-
-        except Exception as e:
-            logger.error(f"Git log failed for {module}: {e}")
+        events[date_key].append({
+            "id": req.id,
+            "title": req.title,
+            "projectId": req.project_id,
+            "status": req.status,
+            "priority": req.priority,
+            "requirementType": req.requirement_type,
+            "commits": commits_by_module,
+            "totalCommits": len(data["commits"]),
+        })
 
     return success(data={
         "events": events,
         "year": year,
         "month": month,
-        "total": len(all_commits),
+        "total": len(req_map),
     })
+
+
+@requirement_bp.route("/<int:req_id>/commits", methods=["GET"])
+@jwt_required()
+def get_requirement_commits(req_id):
+    """获取需求关联的提交记录"""
+    req = Requirement.query.get(req_id)
+    if not req:
+        return error(msg="需求不存在")
+
+    commits = RequirementCommit.query.filter_by(requirement_id=req_id).order_by(
+        RequirementCommit.commit_date.desc()
+    ).all()
+
+    result = []
+    for rc in commits:
+        result.append({
+            "id": rc.id,
+            "module": rc.repo_module,
+            "hash": rc.commit_hash[:7],
+            "fullHash": rc.commit_hash,
+            "subject": rc.commit_subject,
+            "author": rc.commit_author,
+            "date": rc.commit_date.strftime("%Y-%m-%d") if rc.commit_date else None,
+            "files": rc.files_changed or [],
+        })
+
+    return success(data=result)
 
 
 # ==================== 统计视图 ====================

@@ -2,7 +2,7 @@ from app.models.cmdb_vm import CmdbVM
 from app.models.sys import SysMonitor, SysCommonLink, SysRecentVisit
 from app.models.sys_user import SysUser
 from app.models.setting import SysSetting
-from app.models.requirement import Project, Requirement, Milestone
+from app.models.requirement import Project, Requirement, Milestone, RequirementCommit
 from app.models.requirement_extend import (
     RequirementAttachment, RequirementComment, RequirementLabel, RequirementLabelMap,
     RequirementVersion, RequirementActivity,
