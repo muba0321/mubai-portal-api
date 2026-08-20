@@ -570,6 +570,131 @@ def get_requirement_calendar():
     })
 
 
+# ==================== 标签管理 ====================
+
+@requirement_bp.route("/tags", methods=["GET"])
+@jwt_required()
+def list_tags():
+    """获取所有标签"""
+    tags = RequirementLabel.query.order_by(RequirementLabel.created_at.desc()).all()
+    return success(data=[{
+        "id": t.id, "name": t.name, "color": t.color,
+        "createdAt": t.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+    } for t in tags])
+
+
+@requirement_bp.route("/tags", methods=["POST"])
+@jwt_required()
+def create_tag():
+    """创建标签"""
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return error(msg="标签名不能为空")
+    tag = RequirementLabel(name=data["name"], color=data.get("color", "#409eff"))
+    db.session.add(tag)
+    db.session.commit()
+    return success(data={"id": tag.id}, msg="创建成功")
+
+
+@requirement_bp.route("/tags/<int:tag_id>", methods=["PUT"])
+@jwt_required()
+def update_tag(tag_id):
+    """更新标签"""
+    tag = RequirementLabel.query.get(tag_id)
+    if not tag:
+        return error(msg="标签不存在")
+    data = request.get_json()
+    if "name" in data:
+        tag.name = data["name"]
+    if "color" in data:
+        tag.color = data["color"]
+    db.session.commit()
+    return success(msg="更新成功")
+
+
+@requirement_bp.route("/tags/<int:tag_id>", methods=["DELETE"])
+@jwt_required()
+def delete_tag(tag_id):
+    """删除标签"""
+    tag = RequirementLabel.query.get(tag_id)
+    if not tag:
+        return error(msg="标签不存在")
+    RequirementLabelMap.query.filter_by(label_id=tag_id).delete()
+    db.session.delete(tag)
+    db.session.commit()
+    return success(msg="删除成功")
+
+
+@requirement_bp.route("/tags/<int:req_id>", methods=["POST"])
+@jwt_required()
+def add_tag_to_requirement(req_id):
+    """给需求添加标签"""
+    data = request.get_json()
+    tag_id = data.get("tag_id")
+    if not tag_id:
+        return error(msg="标签ID不能为空")
+    existing = RequirementLabelMap.query.filter_by(requirement_id=req_id, label_id=tag_id).first()
+    if existing:
+        return success(msg="标签已存在")
+    link = RequirementLabelMap(requirement_id=req_id, label_id=tag_id)
+    db.session.add(link)
+    db.session.commit()
+    return success(msg="添加成功")
+
+
+@requirement_bp.route("/tags/<int:req_id>", methods=["GET"])
+@jwt_required()
+def get_requirement_tags(req_id):
+    """获取需求的标签"""
+    links = RequirementLabelMap.query.filter_by(requirement_id=req_id).all()
+    tag_ids = [l.label_id for l in links]
+    tags = RequirementLabel.query.filter(RequirementLabel.id.in_(tag_ids)).all()
+    return success(data=[{
+        "id": t.id, "name": t.name, "color": t.color,
+    } for t in tags])
+
+
+@requirement_bp.route("/tags/<int:req_id>/<int:tag_id>", methods=["DELETE"])
+@jwt_required()
+def remove_tag_from_requirement(req_id, tag_id):
+    """移除需求的标签"""
+    RequirementLabelMap.query.filter_by(requirement_id=req_id, label_id=tag_id).delete()
+    db.session.commit()
+    return success(msg="移除成功")
+
+
+# ==================== 附件管理 ====================
+
+@requirement_bp.route("/attachments/<int:req_id>", methods=["GET"])
+@jwt_required()
+def list_attachments(req_id):
+    """获取需求的附件列表"""
+    attachments = RequirementAttachment.query.filter_by(requirement_id=req_id).order_by(
+        RequirementAttachment.created_at.desc()
+    ).all()
+    return success(data=[{
+        "id": a.id, "fileName": a.file_name, "filePath": a.file_path,
+        "fileSize": a.file_size, "fileType": a.file_type,
+        "uploadedBy": a.uploaded_by, "createdAt": a.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "url": f"/api/v1/requirements/attachments/{a.id}/download",
+    } for a in attachments])
+
+
+# ==================== 评论管理 ====================
+
+@requirement_bp.route("/comments/<int:req_id>", methods=["GET"])
+@jwt_required()
+def list_comments(req_id):
+    """获取需求的评论列表"""
+    comments = RequirementComment.query.filter_by(requirement_id=req_id).order_by(
+        RequirementComment.created_at.asc()
+    ).all()
+    return success(data=[{
+        "id": c.id, "content": c.content,
+        "createdBy": c.created_by, "createdAt": c.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+    } for c in comments])
+
+
 @requirement_bp.route("/<int:req_id>/commits", methods=["GET"])
 @jwt_required()
 def get_requirement_commits(req_id):
