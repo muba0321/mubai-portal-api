@@ -452,6 +452,109 @@ def get_calendar():
     return success(data={"events": events, "year": year, "month": month})
 
 
+# ==================== Git 提交记录日历 ====================
+
+@requirement_bp.route("/calendar/commits", methods=["GET"])
+@jwt_required()
+def get_commit_calendar():
+    """Git 提交记录日历（按日期分组）"""
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    import subprocess, os
+    from datetime import date
+
+    start_date = date(year, month, 1)
+    if month == 12:
+        end_date = date(year + 1, 1, 1)
+    else:
+        end_date = date(year, month + 1, 1)
+
+    since = start_date.strftime("%Y-%m-%d")
+    until = end_date.strftime("%Y-%m-%d")
+
+    repos = {
+        "后端": "/opt/sre-portal/mubai-portal-api",
+        "前端": "/opt/sre-portal/mubai-portal",
+    }
+
+    events = {}
+    all_commits = []
+
+    for module, repo_path in repos.items():
+        try:
+            result = subprocess.run(
+                ["git", "log", "--format=%H|%s|%an|%ai|%b", "--numstat",
+                 f"--since={since}", f"--until={until}"],
+                capture_output=True, text=True, cwd=repo_path, timeout=10
+            )
+            output = result.stdout.strip()
+            if not output:
+                continue
+
+            # 解析提交
+            commits = output.split("\n\n")
+            for commit_block in commits:
+                lines = commit_block.strip().split("\n")
+                if not lines or not lines[0] or "|" not in lines[0]:
+                    continue
+
+                meta = lines[0].split("|")
+                if len(meta) < 4:
+                    continue
+
+                commit_hash = meta[0][:7]
+                subject = meta[1]
+                author = meta[2]
+                date_str = meta[3]
+                # 解析日期
+                try:
+                    commit_date = date_str.split(" ")[0]
+                except:
+                    continue
+
+                # 解析文件变更
+                files_changed = []
+                for line in lines[2:]:
+                    parts = line.strip().split("\t")
+                    if len(parts) == 3 and parts[2].endswith((".py", ".ts", ".vue", ".js", ".sql")):
+                        files_changed.append({
+                            "path": parts[2],
+                            "additions": int(parts[0]) if parts[0] != "-" else 0,
+                            "deletions": int(parts[1]) if parts[1] != "-" else 0,
+                        })
+
+                commit_data = {
+                    "hash": commit_hash,
+                    "fullHash": meta[0],
+                    "subject": subject,
+                    "author": author,
+                    "date": commit_date,
+                    "module": module,
+                    "files": files_changed,
+                }
+
+                if commit_date not in events:
+                    events[commit_date] = []
+                events[commit_date].append(commit_data)
+                all_commits.append(commit_data)
+
+        except Exception as e:
+            logger.error(f"Git log failed for {module}: {e}")
+
+    return success(data={
+        "events": events,
+        "year": year,
+        "month": month,
+        "total": len(all_commits),
+    })
+
+
 # ==================== 统计视图 ====================
 
 @requirement_bp.route("/statistics", methods=["GET"])
