@@ -148,9 +148,38 @@ def list_requirements():
 
     requirements = q.order_by(Requirement.view_order.asc(), Requirement.created_at.desc()).all()
 
+    # 构建子需求映射
+    children_map = {}
+    all_reqs = Requirement.query.filter_by(deleted_at=None).order_by(Requirement.view_order.asc()).all()
+    for r in all_reqs:
+        if r.parent_id and r.parent_id in {req.id for req in requirements}:
+            if r.parent_id not in children_map:
+                children_map[r.parent_id] = []
+            children_map[r.parent_id].append({
+                "id": r.id,
+                "projectId": r.project_id,
+                "parentId": r.parent_id,
+                "title": r.title,
+                "description": r.description,
+                "requirementType": r.requirement_type,
+                "priority": r.priority,
+                "status": r.status,
+                "reporterId": r.reporter_id,
+                "assignee": r.assignee,
+                "assigneeId": r.assignee_id,
+                "milestoneId": r.milestone_id,
+                "dueDate": r.due_date.strftime("%Y-%m-%d %H:%M:%S") if r.due_date else None,
+                "estimatedEffort": r.estimated_effort,
+                "tags": r.tags or [],
+                "viewOrder": r.view_order,
+                "version": r.version,
+                "createdAt": r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "updatedAt": r.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+
     result = []
     for r in requirements:
-        result.append({
+        item = {
             "id": r.id,
             "projectId": r.project_id,
             "parentId": r.parent_id,
@@ -170,7 +199,11 @@ def list_requirements():
             "version": r.version,
             "createdAt": r.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             "updatedAt": r.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
-        })
+        }
+        if r.id in children_map:
+            item["children"] = children_map[r.id]
+            item["hasChildren"] = True
+        result.append(item)
     return success(data=result)
 
 
@@ -366,3 +399,110 @@ def _log_activity(req_id, user_id, action, field_name=None, old_value=None, new_
         field_name=field_name, old_value=old_value, new_value=new_value,
     )
     db.session.add(activity)
+
+
+# ==================== 日历视图 ====================
+
+@requirement_bp.route("/calendar", methods=["GET"])
+@jwt_required()
+def get_calendar():
+    """日历数据（按日期分组返回需求）"""
+    project_id = request.args.get("projectId", type=int)
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+
+    if not year or not month:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+    # 计算该月的起止日期
+    from datetime import date
+    start_date = date(year, month, 1)
+    if month == 12:
+        end_date = date(year + 1, 1, 1)
+    else:
+        end_date = date(year, month + 1, 1)
+
+    q = Requirement.query.filter(
+        Requirement.deleted_at.is_(None),
+        Requirement.due_date >= start_date,
+        Requirement.due_date < end_date,
+    )
+    if project_id:
+        q = q.filter_by(project_id=project_id)
+
+    requirements = q.all()
+
+    # 按日期分组
+    events = {}
+    for r in requirements:
+        date_key = r.due_date.strftime("%Y-%m-%d")
+        if date_key not in events:
+            events[date_key] = []
+        events[date_key].append({
+            "id": r.id,
+            "title": r.title,
+            "priority": r.priority,
+            "status": r.status,
+            "assignee": r.assignee,
+            "dueDate": r.due_date.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+    return success(data={"events": events, "year": year, "month": month})
+
+
+# ==================== 统计视图 ====================
+
+@requirement_bp.route("/statistics", methods=["GET"])
+@jwt_required()
+def get_statistics():
+    """统计数据"""
+    project_id = request.args.get("projectId", type=int)
+
+    q = Requirement.query.filter_by(deleted_at=None)
+    if project_id:
+        q = q.filter_by(project_id=project_id)
+
+    all_reqs = q.all()
+    total = len(all_reqs)
+
+    # 状态分布
+    status_stats = {}
+    for r in all_reqs:
+        status_stats[r.status] = status_stats.get(r.status, 0) + 1
+
+    # 优先级分布
+    priority_stats = {}
+    for r in all_reqs:
+        priority_stats[r.priority] = priority_stats.get(r.priority, 0) + 1
+
+    # 负责人工作量
+    assignee_stats = {}
+    for r in all_reqs:
+        assignee = r.assignee or "未分配"
+        if assignee not in assignee_stats:
+            assignee_stats[assignee] = {"total": 0, "completed": 0}
+        assignee_stats[assignee]["total"] += 1
+        if r.status == "done":
+            assignee_stats[assignee]["completed"] += 1
+
+    # 近 30 天完成趋势
+    from datetime import timedelta
+    today = datetime.now().date()
+    trend = []
+    for i in range(29, -1, -1):
+        day = today - timedelta(days=i)
+        completed = sum(
+            1 for r in all_reqs
+            if r.status == "done" and r.completed_at and r.completed_at.date() == day
+        )
+        trend.append({"date": day.strftime("%Y-%m-%d"), "completed": completed})
+
+    return success(data={
+        "total": total,
+        "statusStats": status_stats,
+        "priorityStats": priority_stats,
+        "assigneeStats": assignee_stats,
+        "trend": trend,
+    })
