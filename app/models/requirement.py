@@ -14,6 +14,7 @@ class Project(db.Model):
     name = db.Column(db.String(128), nullable=False)
     description = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(32), nullable=False, default="active")
+    sort = db.Column(db.Integer, default=0, comment="排序值，越小越靠前")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 

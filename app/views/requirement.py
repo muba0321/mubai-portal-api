@@ -64,10 +64,11 @@ def list_projects():
     q = Project.query
     if status_filter:
         q = q.filter_by(status=status_filter)
-    projects = q.order_by(Project.created_at.desc()).all()
+    projects = q.order_by(Project.sort.asc(), Project.created_at.desc()).all()
     return success(data=[{
         "id": p.id, "name": p.name, "description": p.description,
-        "status": p.status, "createdAt": p.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "status": p.status, "sort": p.sort,
+        "createdAt": p.created_at.strftime("%Y-%m-%d %H:%M:%S"),
     } for p in projects])
 
 
@@ -114,6 +115,21 @@ def delete_project(project_id):
     db.session.delete(project)
     db.session.commit()
     return success(msg="删除成功")
+
+
+@requirement_bp.route("/projects/sort", methods=["PUT"])
+@jwt_required()
+def batch_update_project_sort():
+    """批量更新项目排序"""
+    data = request.get_json()
+    if not data or "projectIds" not in data:
+        return error(msg="projectIds 不能为空")
+    for idx, pid in enumerate(data["projectIds"]):
+        project = Project.query.get(pid)
+        if project:
+            project.sort = idx
+    db.session.commit()
+    return success(msg="排序已更新")
 
 
 # ==================== 需求 CRUD ====================
