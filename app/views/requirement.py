@@ -479,8 +479,8 @@ def get_commit_calendar():
     until = end_date.strftime("%Y-%m-%d")
 
     repos = {
-        "后端": "/opt/sre-portal/mubai-portal-api",
-        "前端": "/opt/sre-portal/mubai-portal",
+        "后端": "/opt/repos/backend",
+        "前端": "/opt/repos/frontend",
     }
 
     events = {}
@@ -488,23 +488,21 @@ def get_commit_calendar():
 
     for module, repo_path in repos.items():
         try:
+            if not os.path.exists(os.path.join(repo_path, ".git")):
+                continue
+            # 获取提交列表
             result = subprocess.run(
-                ["git", "log", "--format=%H|%s|%an|%ai|%b", "--numstat",
-                 f"--since={since}", f"--until={until}"],
+                ["git", "log", "--format=%H|%s|%an|%ai", f"--since={since}", f"--until={until}"],
                 capture_output=True, text=True, cwd=repo_path, timeout=10
             )
             output = result.stdout.strip()
             if not output:
                 continue
 
-            # 解析提交
-            commits = output.split("\n\n")
-            for commit_block in commits:
-                lines = commit_block.strip().split("\n")
-                if not lines or not lines[0] or "|" not in lines[0]:
+            for line in output.split("\n"):
+                if not line or "|" not in line:
                     continue
-
-                meta = lines[0].split("|")
+                meta = line.split("|")
                 if len(meta) < 4:
                     continue
 
@@ -512,22 +510,28 @@ def get_commit_calendar():
                 subject = meta[1]
                 author = meta[2]
                 date_str = meta[3]
-                # 解析日期
                 try:
                     commit_date = date_str.split(" ")[0]
                 except:
                     continue
 
-                # 解析文件变更
+                # 获取该提交的文件变更
                 files_changed = []
-                for line in lines[2:]:
-                    parts = line.strip().split("\t")
-                    if len(parts) == 3 and parts[2].endswith((".py", ".ts", ".vue", ".js", ".sql")):
-                        files_changed.append({
-                            "path": parts[2],
-                            "additions": int(parts[0]) if parts[0] != "-" else 0,
-                            "deletions": int(parts[1]) if parts[1] != "-" else 0,
-                        })
+                try:
+                    numstat = subprocess.run(
+                        ["git", "show", "--format=", "--numstat", meta[0]],
+                        capture_output=True, text=True, cwd=repo_path, timeout=5
+                    )
+                    for fline in numstat.stdout.strip().split("\n"):
+                        parts = fline.strip().split("\t")
+                        if len(parts) == 3 and parts[2].endswith((".py", ".ts", ".vue", ".js", ".sql")):
+                            files_changed.append({
+                                "path": parts[2],
+                                "additions": int(parts[0]) if parts[0] != "-" else 0,
+                                "deletions": int(parts[1]) if parts[1] != "-" else 0,
+                            })
+                except:
+                    pass
 
                 commit_data = {
                     "hash": commit_hash,
@@ -542,7 +546,6 @@ def get_commit_calendar():
                 if commit_date not in events:
                     events[commit_date] = []
                 events[commit_date].append(commit_data)
-                all_commits.append(commit_data)
 
         except Exception as e:
             logger.error(f"Git log failed for {module}: {e}")

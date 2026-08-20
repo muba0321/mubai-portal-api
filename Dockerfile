@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     wget \
     openssh-client \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Python 依赖
