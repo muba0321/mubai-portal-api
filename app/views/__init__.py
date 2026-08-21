@@ -24,6 +24,8 @@ from app.views.credential import credential_bp
 from app.views.git_repo import git_bp
 # 服务备份管理
 from app.views.backup import backup_bp
+# 测试管理
+from app.views.test_case import test_case_bp
 
 
 def register_blueprints(app):
@@ -60,3 +62,6 @@ def register_blueprints(app):
     # 服务备份管理
     from app.views.backup import backup_bp
     app.register_blueprint(backup_bp, url_prefix="/api/v1/backup")
+
+    # 测试管理
+    app.register_blueprint(test_case_bp, url_prefix="/api/v1/test-cases")

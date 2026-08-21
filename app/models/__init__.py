@@ -21,3 +21,5 @@ from app.models.approval import ApprovalTemplate, ApprovalRecord, ApprovalStep
 from app.models.grafana_ai_history import GrafanaAiHistory
 from app.models.ansible_job import AnsibleJob, AnsibleSchedule, AnsibleCommand, AnsibleScheduleLog
 from app.models.service_backup import ServiceBackup, ServiceBackupLog
+# 测试管理
+from app.models.test_case import TestCase, TestCaseRequirementMap, TestExecution, TestExecutionStep
