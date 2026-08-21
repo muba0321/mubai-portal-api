@@ -119,19 +119,15 @@ def delete_project(project_id):
 
 @requirement_bp.route("/projects/sort", methods=["PUT"])
 @jwt_required()
-def update_projects_sort():
+def batch_update_project_sort():
     """批量更新项目排序"""
     data = request.get_json()
-    if not data or not isinstance(data, list):
-        return error(msg="请求数据格式错误")
-
-    for item in data:
-        if "id" not in item or "sort" not in item:
-            continue
-        project = Project.query.get(item["id"])
+    if not data or "projectIds" not in data:
+        return error(msg="projectIds 不能为空")
+    for idx, pid in enumerate(data["projectIds"]):
+        project = Project.query.get(pid)
         if project:
-            project.sort = item["sort"]
-
+            project.sort = idx
     db.session.commit()
     return success(msg="排序已更新")
 
@@ -685,84 +681,34 @@ def remove_tag_from_requirement(req_id, tag_id):
 
 # ==================== 附件管理 ====================
 
-@requirement_bp.route("/attachments/<int:req_id>", methods=["GET", "POST"])
+@requirement_bp.route("/attachments/<int:req_id>", methods=["GET"])
 @jwt_required()
-def handle_attachments(req_id):
-    """获取附件列表或上传附件"""
-    req = Requirement.query.get(req_id)
-    if not req:
-        return error(msg="需求不存在")
-
-    if request.method == "GET":
-        attachments = RequirementAttachment.query.filter_by(requirement_id=req_id).order_by(
-            RequirementAttachment.created_at.desc()
-        ).all()
-        return success(data=[{
-            "id": a.id, "fileName": a.file_name, "filePath": a.file_path,
-            "fileSize": a.file_size, "fileType": a.file_type,
-            "uploadedBy": a.uploaded_by, "createdAt": a.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        } for a in attachments])
-
-    # POST: upload attachment
-    if 'file' not in request.files:
-        return error(msg="请选择文件")
-
-    file = request.files['file']
-    if not file.filename:
-        return error(msg="文件名不能为空")
-
-    # Save file to local storage
-    import os
-    upload_dir = "/app/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, f"{req_id}_{file.filename}")
-    file.save(file_path)
-
-    attachment = RequirementAttachment(
-        requirement_id=req_id,
-        file_name=file.filename,
-        file_path=file_path,
-        file_size=os.path.getsize(file_path),
-        file_type=file.content_type or "application/octet-stream",
-        uploaded_by="mubai",
-    )
-    db.session.add(attachment)
-    db.session.commit()
-    return success(data={"id": attachment.id}, msg="上传成功")
+def list_attachments(req_id):
+    """获取需求的附件列表"""
+    attachments = RequirementAttachment.query.filter_by(requirement_id=req_id).order_by(
+        RequirementAttachment.created_at.desc()
+    ).all()
+    return success(data=[{
+        "id": a.id, "fileName": a.file_name, "filePath": a.file_path,
+        "fileSize": a.file_size, "fileType": a.file_type,
+        "uploadedBy": a.uploaded_by, "createdAt": a.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "url": f"/api/v1/requirements/attachments/{a.id}/download",
+    } for a in attachments])
 
 
 # ==================== 评论管理 ====================
 
-@requirement_bp.route("/comments/<int:req_id>", methods=["GET", "POST"])
+@requirement_bp.route("/comments/<int:req_id>", methods=["GET"])
 @jwt_required()
-def handle_comments(req_id):
-    """获取评论列表或添加评论"""
-    req = Requirement.query.get(req_id)
-    if not req:
-        return error(msg="需求不存在")
-
-    if request.method == "GET":
-        comments = RequirementComment.query.filter_by(requirement_id=req_id).order_by(
-            RequirementComment.created_at.asc()
-        ).all()
-        return success(data=[{
-            "id": c.id, "content": c.content,
-            "createdBy": c.created_by, "createdAt": c.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        } for c in comments])
-
-    # POST: add comment
-    data = request.get_json()
-    if not data or not data.get("content"):
-        return error(msg="评论内容不能为空")
-
-    comment = RequirementComment(
-        requirement_id=req_id,
-        content=data["content"],
-        created_by="mubai",
-    )
-    db.session.add(comment)
-    db.session.commit()
-    return success(data={"id": comment.id}, msg="评论成功")
+def list_comments(req_id):
+    """获取需求的评论列表"""
+    comments = RequirementComment.query.filter_by(requirement_id=req_id).order_by(
+        RequirementComment.created_at.asc()
+    ).all()
+    return success(data=[{
+        "id": c.id, "content": c.content,
+        "createdBy": c.created_by, "createdAt": c.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+    } for c in comments])
 
 
 @requirement_bp.route("/<int:req_id>/commits", methods=["GET"])
