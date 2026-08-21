@@ -202,7 +202,7 @@ def execute_test_case(case_id):
     if not case:
         return error(msg="用例不存在")
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
 
     if case.test_type == "api":
         result = _execute_api_test(case)
