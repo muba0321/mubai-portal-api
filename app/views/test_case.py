@@ -204,8 +204,10 @@ def execute_test_case(case_id):
 
     data = request.get_json(silent=True) or {}
 
+    auth_header = request.headers.get("Authorization", "")
+
     if case.test_type == "api":
-        result = _execute_api_test(case)
+        result = _execute_api_test(case, auth_header)
     else:
         result = _record_manual_test(case, data)
 
@@ -366,16 +368,31 @@ def _case_to_dict(case, full=False):
     return d
 
 
-def _execute_api_test(case):
+def _execute_api_test(case, auth_header=""):
     """执行 API 测试"""
     start_time = time.time()
     try:
+        # 将公网 URL 转换为内部地址
+        test_url = case.api_url
+        if "portal.mubai.top" in test_url:
+            test_url = test_url.replace("https://portal.mubai.top", "http://localhost:5000").replace("http://portal.mubai.top", "http://localhost:5000")
+
+        # 构建请求头，使用当前请求的 token
+        headers = {}
+        if auth_header:
+            headers["Authorization"] = auth_header
+        if case.api_headers:
+            api_hdrs = dict(case.api_headers)
+            api_hdrs.pop("Authorization", None)
+            headers.update(api_hdrs)
+
         resp = req_lib.request(
             method=case.api_method or "GET",
-            url=case.api_url,
-            headers=case.api_headers or {},
+            url=test_url,
+            headers=headers,
             data=case.api_body,
             timeout=30,
+            verify=False,
         )
         duration = int((time.time() - start_time) * 1000)
 
