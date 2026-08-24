@@ -26,6 +26,8 @@ from app.views.git_repo import git_bp
 from app.views.backup import backup_bp
 # 测试管理
 from app.views.test_case import test_case_bp
+# 知识库管理
+from app.views.knowledge_base import knowledge_bp
 
 
 def register_blueprints(app):
@@ -65,3 +67,6 @@ def register_blueprints(app):
 
     # 测试管理
     app.register_blueprint(test_case_bp, url_prefix="/api/v1/test-cases")
+
+    # 知识库管理
+    app.register_blueprint(knowledge_bp, url_prefix="/api/v1/knowledge")

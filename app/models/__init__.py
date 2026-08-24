@@ -23,3 +23,5 @@ from app.models.ansible_job import AnsibleJob, AnsibleSchedule, AnsibleCommand, 
 from app.models.service_backup import ServiceBackup, ServiceBackupLog
 # 测试管理
 from app.models.test_case import TestCase, TestCaseRequirementMap, TestExecution, TestExecutionStep
+# 知识库管理
+from app.models.knowledge_base import KbFile, KbSyncLog
