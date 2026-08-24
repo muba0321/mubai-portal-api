@@ -41,7 +41,6 @@ def trigger_sync():
         duration = int((time.time() - start_time) * 1000)
 
         if result.returncode == 0:
-            # 解析 rsync 输出
             rsync_log = result.stdout
             files_added = rsync_log.count("created")
             files_updated = rsync_log.count("updated")
@@ -60,8 +59,6 @@ def trigger_sync():
             log.error_msg = result.stderr[:500]
 
         db.session.commit()
-
-        # 重新扫描文件索引
         scan_files()
 
         return success(data={
@@ -83,7 +80,6 @@ def trigger_sync():
 @jwt_required()
 def get_sync_status():
     """获取同步状态"""
-    # 最近 10 条同步日志
     logs = KbSyncLog.query.order_by(KbSyncLog.started_at.desc()).limit(10).all()
     last_sync = logs[0] if logs else None
 
@@ -114,7 +110,6 @@ def get_tree():
     """获取目录树（支持任意深度）"""
     files = KbFile.query.order_by(KbFile.file_path).all()
 
-    # 构建嵌套树结构
     root = {"name": "", "children": {}, "files": []}
 
     for f in files:
@@ -127,9 +122,10 @@ def get_tree():
         node["files"].append({
             "name": f.file_name,
             "path": f.file_path,
-            "title": f.title or f.file_name.replace(".md", ""),
+            "title": f.title or os.path.splitext(f.file_name)[0],
             "size": f.file_size,
             "wordCount": f.word_count,
+            "fileExt": f.file_ext or os.path.splitext(f.file_name)[1].lower(),
         })
 
     def count_files(node):
@@ -186,11 +182,12 @@ def list_files():
             "id": f.id,
             "path": f.file_path,
             "name": f.file_name,
-            "title": f.title or f.file_name.replace(".md", ""),
+            "title": f.title or os.path.splitext(f.file_name)[0],
             "category": f.category,
             "subCategory": f.sub_category,
             "size": f.file_size,
             "wordCount": f.word_count,
+            "fileExt": f.file_ext or os.path.splitext(f.file_name)[1].lower(),
             "modifiedAt": f.modified_at.strftime("%Y-%m-%d %H:%M:%S") if f.modified_at else None,
         } for f in files],
         "total": total,
@@ -205,40 +202,28 @@ def list_files():
 @jwt_required()
 def get_file_content(file_path):
     """获取文件内容"""
-    # 从数据库查找
     kb_file = KbFile.query.filter_by(file_path=file_path).first()
-    if not kb_file:
-        # 尝试从文件系统读取
-        full_path = os.path.join(KB_TARGET, file_path)
-        if os.path.exists(full_path):
-            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            return success(data={
-                "path": file_path,
-                "name": os.path.basename(file_path),
-                "content": content,
-                "size": os.path.getsize(full_path),
-            })
-        return error(msg="文件不存在")
 
-    # 从文件系统读取原文
     full_path = os.path.join(KB_TARGET, file_path)
     content = ""
     if os.path.exists(full_path):
         with open(full_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
 
+    file_ext = kb_file.file_ext if kb_file else os.path.splitext(file_path)[1].lower()
+
     return success(data={
-        "id": kb_file.id,
-        "path": kb_file.file_path,
-        "name": kb_file.file_name,
-        "title": kb_file.title,
-        "category": kb_file.category,
-        "subCategory": kb_file.sub_category,
+        "id": kb_file.id if kb_file else None,
+        "path": file_path,
+        "name": os.path.basename(file_path),
+        "title": kb_file.title if kb_file else os.path.splitext(os.path.basename(file_path))[0],
+        "category": kb_file.category if kb_file else "",
+        "subCategory": kb_file.sub_category if kb_file else "",
         "content": content,
-        "size": kb_file.file_size,
-        "wordCount": kb_file.word_count,
-        "modifiedAt": kb_file.modified_at.strftime("%Y-%m-%d %H:%M:%S") if kb_file.modified_at else None,
+        "size": kb_file.file_size if kb_file else os.path.getsize(full_path) if os.path.exists(full_path) else 0,
+        "wordCount": kb_file.word_count if kb_file else 0,
+        "fileExt": file_ext,
+        "modifiedAt": kb_file.modified_at.strftime("%Y-%m-%d %H:%M:%S") if kb_file and kb_file.modified_at else None,
     })
 
 
@@ -270,10 +255,11 @@ def search_files():
     return success(data=[{
         "path": f.file_path,
         "name": f.file_name,
-        "title": f.title or f.file_name.replace(".md", ""),
+        "title": f.title or os.path.splitext(f.file_name)[0],
         "category": f.category,
         "subCategory": f.sub_category,
         "wordCount": f.word_count,
+        "fileExt": f.file_ext or os.path.splitext(f.file_name)[1].lower(),
         "modifiedAt": f.modified_at.strftime("%Y-%m-%d %H:%M:%S") if f.modified_at else None,
     } for f in files])
 
@@ -299,17 +285,24 @@ def get_stats():
 
 # ==================== 辅助函数 ====================
 
+# 支持的文件类型
+SUPPORTED_EXTS = {
+    ".md", ".sh", ".py", ".yml", ".yaml", ".json", ".txt",
+    ".conf", ".cfg", ".ini", ".log", ".sql", ".js", ".ts",
+    ".env", ".toml", ".xml", ".csv",
+}
+
 def scan_files():
     """扫描文件系统，更新文件索引"""
     added = 0
     updated = 0
 
     for root, dirs, files in os.walk(KB_TARGET):
-        # 排除隐藏目录
         dirs[:] = [d for d in dirs if not d.startswith(".")]
 
         for fname in files:
-            if not fname.endswith(".md"):
+            _, ext = os.path.splitext(fname)
+            if ext.lower() not in SUPPORTED_EXTS:
                 continue
 
             full_path = os.path.join(root, fname)
@@ -321,26 +314,25 @@ def scan_files():
                     content = f.read()
 
                 # 提取标题
-                title = fname.replace(".md", "")
-                fm_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
-                if fm_match:
-                    title = fm_match.group(1).strip().strip('"').strip("'")
+                title = os.path.splitext(fname)[0]
+                if ext.lower() == ".md":
+                    fm_match = re.search(r"^title:\s*(.+)$", content, re.MULTILINE)
+                    if fm_match:
+                        title = fm_match.group(1).strip().strip('"').strip("'")
 
-                # 字数统计
-                word_count = len(re.findall(r"[一-鿿\w]+", content))
+                word_count = len(re.findall(r"[\w一-鿿]+", content))
 
-                # 分类
                 parts = rel_path.split("/")
                 category = parts[0] if parts else ""
                 sub_category = parts[1] if len(parts) > 1 else ""
 
-                # 更新或创建
                 kb_file = KbFile.query.filter_by(file_path=rel_path).first()
                 if kb_file:
                     kb_file.title = title
+                    kb_file.file_ext = ext.lower()
                     kb_file.file_size = stat.st_size
                     kb_file.word_count = word_count
-                    kb_file.content_text = content[:50000]  # 限制内容长度
+                    kb_file.content_text = content[:50000]
                     kb_file.modified_at = datetime.fromtimestamp(stat.st_mtime)
                     kb_file.synced_at = datetime.now()
                     updated += 1
@@ -348,6 +340,7 @@ def scan_files():
                     kb_file = KbFile(
                         file_path=rel_path,
                         file_name=fname,
+                        file_ext=ext.lower(),
                         title=title,
                         category=category,
                         sub_category=sub_category,

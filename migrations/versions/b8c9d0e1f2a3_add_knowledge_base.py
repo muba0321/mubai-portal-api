@@ -19,6 +19,7 @@ def upgrade():
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("file_path", sa.String(512), nullable=False, unique=True),
         sa.Column("file_name", sa.String(256), nullable=False),
+        sa.Column("file_ext", sa.String(10)),
         sa.Column("title", sa.String(256)),
         sa.Column("category", sa.String(64)),
         sa.Column("sub_category", sa.String(64)),
