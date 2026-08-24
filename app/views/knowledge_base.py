@@ -111,59 +111,48 @@ def get_sync_status():
 @knowledge_bp.route("/tree", methods=["GET"])
 @jwt_required()
 def get_tree():
-    """获取目录树"""
-    # 从数据库获取所有文件
+    """获取目录树（支持任意深度）"""
     files = KbFile.query.order_by(KbFile.file_path).all()
 
-    tree = {}
+    # 构建嵌套树结构
+    root = {"name": "", "children": {}, "files": []}
+
     for f in files:
         parts = f.file_path.split("/")
-        category = parts[0] if parts else "其他"
-        sub = parts[1] if len(parts) > 1 else ""
-
-        if category not in tree:
-            tree[category] = {"children": {}, "files": []}
-
-        if sub:
-            if sub not in tree[category]["children"]:
-                tree[category]["children"][sub] = []
-            tree[category]["children"][sub].append({
-                "name": f.file_name,
-                "path": f.file_path,
-                "title": f.title or f.file_name.replace(".md", ""),
-                "size": f.file_size,
-                "wordCount": f.word_count,
-            })
-        else:
-            tree[category]["files"].append({
-                "name": f.file_name,
-                "path": f.file_path,
-                "title": f.title or f.file_name.replace(".md", ""),
-                "size": f.file_size,
-                "wordCount": f.word_count,
-            })
-
-    # 转换为列表格式
-    result = []
-    for cat_name in sorted(tree.keys()):
-        cat = tree[cat_name]
-        children = []
-        for sub_name in sorted(cat["children"].keys()):
-            children.append({
-                "name": sub_name,
-                "type": "folder",
-                "children": cat["children"][sub_name],
-            })
-
-        result.append({
-            "name": cat_name,
-            "type": "category",
-            "fileCount": len(cat["files"]) + sum(len(c["children"]) for c in children),
-            "children": children,
-            "files": cat["files"],
+        node = root
+        for i, part in enumerate(parts[:-1]):
+            if part not in node["children"]:
+                node["children"][part] = {"name": part, "children": {}, "files": []}
+            node = node["children"][part]
+        node["files"].append({
+            "name": f.file_name,
+            "path": f.file_path,
+            "title": f.title or f.file_name.replace(".md", ""),
+            "size": f.file_size,
+            "wordCount": f.word_count,
         })
 
-    return success(data=result)
+    def count_files(node):
+        total = len(node["files"])
+        for child in node["children"].values():
+            total += count_files(child)
+        return total
+
+    def to_list(node):
+        result = []
+        for name in sorted(node["children"].keys()):
+            child = node["children"][name]
+            result.append({
+                "name": name,
+                "type": "folder",
+                "fileCount": count_files(child),
+                "children": to_list(child),
+                "files": child["files"],
+            })
+        result.extend(node["files"])
+        return result
+
+    return success(data=to_list(root))
 
 
 # ==================== 文件列表 ====================
