@@ -62,6 +62,9 @@ class Requirement(db.Model):
     tags = db.Column(db.JSON(), comment="标签缓存")
     version = db.Column(db.Integer, default=1, comment="版本号")
 
+    # CICD 阶段
+    cicd_stage = db.Column(db.String(20), comment="CICD 阶段")
+
     # 时间戳
     approved_at = db.Column(db.DateTime, comment="审批通过时间")
     completed_at = db.Column(db.DateTime, comment="完成时间")
