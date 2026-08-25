@@ -35,7 +35,10 @@ pipeline {
             steps {
                 echo '=== 部署后端 ==='
                 sh '''
-                    # 重建后端容器（使用 /opt/sre-portal 的 docker-compose）
+                    # 清理旧容器（避免名称冲突）
+                    docker rm -f sre-portal-backend 2>/dev/null || true
+
+                    # 使用 /opt/sre-portal 的 docker-compose 重建
                     cd /opt/sre-portal
                     docker compose up -d --build sre-portal-backend
                     sleep 5
