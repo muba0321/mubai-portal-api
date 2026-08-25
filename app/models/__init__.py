@@ -25,3 +25,5 @@ from app.models.service_backup import ServiceBackup, ServiceBackupLog
 from app.models.test_case import TestCase, TestCaseRequirementMap, TestExecution, TestExecutionStep
 # 知识库管理
 from app.models.knowledge_base import KbFile, KbSyncLog
+# CICD 流程管理
+from app.models.cicd import CICDStageConfig, CICDMilestone

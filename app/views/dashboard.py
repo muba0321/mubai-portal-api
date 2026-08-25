@@ -3,6 +3,8 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models.sys import SysMonitor, SysCommonLink, SysRecentVisit
+from app.models.cicd import CICDStageConfig, CICDMilestone
+from app.models.requirement import Requirement
 from app.utils.response import success
 from app.config import Config
 
@@ -210,3 +212,39 @@ def create_recent_visit():
         db.session.add(visit)
     db.session.commit()
     return success()
+
+
+@dashboard_bp.route("/cicd-stages", methods=["GET"])
+@jwt_required()
+def cicd_stages():
+    """获取 CICD 流程阶段进度"""
+    stages = CICDStageConfig.query.order_by(CICDStageConfig.stage_order).all()
+
+    result = []
+    for stage in stages:
+        # 计算该阶段的需求进度
+        total_reqs = Requirement.query.filter_by(cicd_stage=stage.stage_name).count()
+        completed_reqs = Requirement.query.filter_by(
+            cicd_stage=stage.stage_name,
+            status='done'
+        ).count()
+
+        progress = int((completed_reqs / total_reqs * 100)) if total_reqs > 0 else 0
+
+        # 获取该阶段的里程碑
+        milestones = CICDMilestone.query.filter_by(stage_name=stage.stage_name).all()
+
+        result.append({
+            "id": stage.id,
+            "name": stage.stage_name,
+            "icon": stage.stage_icon,
+            "color": stage.stage_color,
+            "order": stage.stage_order,
+            "description": stage.description,
+            "total_requirements": total_reqs,
+            "completed_requirements": completed_reqs,
+            "progress": progress,
+            "milestones": [m.to_dict() for m in milestones]
+        })
+
+    return success(data={"stages": result})
